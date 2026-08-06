@@ -126,6 +126,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         if JarvisEngine.isAvailable {
             submenu.addItem(toggle("Clean up dictation automatically", #selector(toggleJarvisAuto), settings.jarvisAutoCleanup))
+            submenu.addItem(item("Chat with On-Device AI…", action: #selector(showJarvisChat)))
         } else {
             let unavailable = NSMenuItem(title: "Unavailable — needs Apple Intelligence", action: nil, keyEquivalent: "")
             unavailable.isEnabled = false
@@ -265,6 +266,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleClearAfterCommit() { settings.clearAfterCommit.toggle() }
     @objc private func toggleHideAfterCommit() { settings.hideAfterCommit.toggle() }
     @objc private func toggleJarvisAuto() { settings.jarvisAutoCleanup.toggle() }
+    @objc private func showJarvisChat() {
+        // Menu actions arrive on the main thread; hop explicitly for the actor.
+        Task { @MainActor in JarvisChatWindowController.shared.show() }
+    }
 
     @objc private func deleteJarvisNote(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let id = UUID(uuidString: raw) else { return }

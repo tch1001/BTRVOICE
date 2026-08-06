@@ -99,6 +99,20 @@ enum JarvisEngine {
             """)
     }
 
+    /// Raw, single-shot access to the on-device model — no Jarvis persona, no
+    /// notes, no sanitising. Powers the `--ask` flag and the test chat window.
+    static func ask(_ prompt: String) async throws -> String {
+        #if canImport(FoundationModels)
+        guard #available(macOS 26.0, *), isAvailable else { throw JarvisError.unavailable }
+        let session = LanguageModelSession()
+        let result = try await session.respond(to: prompt).content
+        guard !result.isEmpty else { throw JarvisError.emptyResult }
+        return result
+        #else
+        throw JarvisError.unavailable
+        #endif
+    }
+
     private static func respond(prompt: String) async throws -> String {
         #if canImport(FoundationModels)
         guard #available(macOS 26.0, *), isAvailable else { throw JarvisError.unavailable }
