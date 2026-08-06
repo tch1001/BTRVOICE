@@ -199,6 +199,7 @@ final class DictationController: ObservableObject {
         case .copyInTarget: label = "Copy (⌘C)"
         case .selectAllInTarget: label = "Select All (⌘A)"
         case .clickAtPointer: label = "Click"
+        case .commitAndSend: label = "Insert & Send"
         case .insert: return
         }
         pendingCommandTimer?.invalidate()
@@ -260,6 +261,9 @@ final class DictationController: ObservableObject {
             Log.write("voice command: click at pointer")
             status = "Clicked"
             TextInjector.clickAtPointer(completion: done)
+        case .commitAndSend:
+            Log.write("voice command: insert & send")
+            commit(send: true)
         case .insert:
             break
         }

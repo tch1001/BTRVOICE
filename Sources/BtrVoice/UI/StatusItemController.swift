@@ -265,7 +265,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         “do paste” — press ⌘V in the focused app
         “do copy” — press ⌘C
         “do select all” — press ⌘A
-        “do send it” / “do click” — click at the mouse pointer
+        “do click” — click at the mouse pointer
+        “do send it” — insert the buffer, then press Return
 
         Keyboard: ⌥Space dictate · ⌥↩ insert · ⌥⎋ discard
         ⌘↩ insert from the panel · backspace button: ⌥-click deletes a word

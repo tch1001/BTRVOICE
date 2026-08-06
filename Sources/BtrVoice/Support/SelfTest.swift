@@ -42,7 +42,7 @@ enum SelfTest {
             check("do copy presses ⌘C", VoiceCommands.parse("do copy", enabled: true) == [.copyInTarget])
             check("do select all presses ⌘A", VoiceCommands.parse("do select all", enabled: true) == [.selectAllInTarget])
             check("do click clicks", VoiceCommands.parse("do click", enabled: true) == [.clickAtPointer])
-            check("do send it clicks", VoiceCommands.parse("do send it", enabled: true) == [.clickAtPointer])
+            check("do send it inserts and sends", VoiceCommands.parse("do send it", enabled: true) == [.commitAndSend])
         }
         do {
             check("command words without the trigger stay literal",

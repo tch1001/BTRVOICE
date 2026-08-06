@@ -9,8 +9,10 @@ enum BufferAction: Equatable {
     case copyInTarget
     /// "do select all" — press ⌘A in the focused app.
     case selectAllInTarget
-    /// "do send it" / "do click" — left-click at the current pointer position.
+    /// "do click" — left-click at the current pointer position.
     case clickAtPointer
+    /// "do send it" — type the buffer into the focused app, then press Return.
+    case commitAndSend
 }
 
 /// Turns spoken control phrases into buffer actions, so the user never has to
@@ -27,7 +29,7 @@ enum VoiceCommands {
         ["copy"]: .copyInTarget,
         ["select", "all"]: .selectAllInTarget,
         ["click"]: .clickAtPointer,
-        ["send", "it"]: .clickAtPointer,
+        ["send", "it"]: .commitAndSend,
     ]
 
     private static let maxPhraseLength = 2
