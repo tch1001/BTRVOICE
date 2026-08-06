@@ -197,6 +197,7 @@ final class DictationController: ObservableObject {
         switch action {
         case .pasteInTarget: label = "Paste (⌘V)"
         case .copyInTarget: label = "Copy (⌘C)"
+        case .selectAllInTarget: label = "Select All (⌘A)"
         case .clickAtPointer: label = "Click"
         case .insert: return
         }
@@ -251,6 +252,10 @@ final class DictationController: ObservableObject {
             Log.write("voice command: copy (⌘C)")
             status = "Copied"
             TextInjector.pressShortcut(.copy, completion: done)
+        case .selectAllInTarget:
+            Log.write("voice command: select all (⌘A)")
+            status = "Selected all"
+            TextInjector.pressShortcut(.selectAll, completion: done)
         case .clickAtPointer:
             Log.write("voice command: click at pointer")
             status = "Clicked"

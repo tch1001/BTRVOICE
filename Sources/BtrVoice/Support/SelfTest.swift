@@ -21,27 +21,39 @@ enum SelfTest {
 
         print("VoiceCommands")
         do {
-            let actions = VoiceCommands.parse("hello world paste goodbye", enabled: true)
+            let actions = VoiceCommands.parse("hello world do paste goodbye", enabled: true)
             check("splits literals around a command",
                   actions == [.insert("hello world"), .pasteInTarget, .insert("goodbye")],
                   "\(actions)")
         }
         do {
-            let actions = VoiceCommands.parse("hello paste there", enabled: false)
+            let actions = VoiceCommands.parse("hello do paste there", enabled: false)
             check("passes everything through when disabled",
-                  actions == [.insert("hello paste there")], "\(actions)")
+                  actions == [.insert("hello do paste there")], "\(actions)")
         }
         do {
             // The recogniser punctuates and capitalises; commands must survive that.
-            let actions = VoiceCommands.parse("Paste.", enabled: true)
+            let actions = VoiceCommands.parse("Do paste.", enabled: true)
             check("matches despite capitalisation and punctuation",
                   actions == [.pasteInTarget], "\(actions)")
         }
         do {
-            check("paste presses ⌘V", VoiceCommands.parse("paste", enabled: true) == [.pasteInTarget])
-            check("copy presses ⌘C", VoiceCommands.parse("copy", enabled: true) == [.copyInTarget])
-            check("click clicks", VoiceCommands.parse("click", enabled: true) == [.clickAtPointer])
-            check("send it clicks", VoiceCommands.parse("send it", enabled: true) == [.clickAtPointer])
+            check("do paste presses ⌘V", VoiceCommands.parse("do paste", enabled: true) == [.pasteInTarget])
+            check("do copy presses ⌘C", VoiceCommands.parse("do copy", enabled: true) == [.copyInTarget])
+            check("do select all presses ⌘A", VoiceCommands.parse("do select all", enabled: true) == [.selectAllInTarget])
+            check("do click clicks", VoiceCommands.parse("do click", enabled: true) == [.clickAtPointer])
+            check("do send it clicks", VoiceCommands.parse("do send it", enabled: true) == [.clickAtPointer])
+        }
+        do {
+            check("command words without the trigger stay literal",
+                  VoiceCommands.parse("please paste the text", enabled: true)
+                  == [.insert("please paste the text")])
+            check("bare trigger stays literal",
+                  VoiceCommands.parse("what should I do", enabled: true)
+                  == [.insert("what should I do")])
+            check("trigger followed by a non-command stays literal",
+                  VoiceCommands.parse("do the dishes", enabled: true)
+                  == [.insert("do the dishes")])
         }
         do {
             let actions = VoiceCommands.parse("", enabled: true)

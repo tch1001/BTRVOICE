@@ -23,9 +23,6 @@ struct DictationPanelView: View {
             header
             Divider().opacity(0.5)
             transcript
-            if let pending = controller.pendingCommand {
-                pendingCommandBanner(pending)
-            }
             if let error = controller.errorMessage {
                 errorBanner(error)
             }
@@ -123,46 +120,83 @@ struct DictationPanelView: View {
     // size the user resizes the window to, scrolling on overflow, and never resizes
     // itself mid-sentence.
     private var transcript: some View {
-        BufferTextView(
-            text: buffer.text,
-            partial: buffer.partial,
-            revision: buffer.revision,
-            placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
-            onEdit: { buffer.userDidEdit($0) },
-            onAdoptAll: { controller.adoptEditedText($0) },
-            onCommit: { controller.commit(send: false) },
-            onCancel: { controller.cancel() }
-        )
+        ZStack {
+            BufferTextView(
+                text: buffer.text,
+                partial: buffer.partial,
+                revision: buffer.revision,
+                placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
+                onEdit: { buffer.userDidEdit($0) },
+                onAdoptAll: { controller.adoptEditedText($0) },
+                onCommit: { controller.commit(send: false) },
+                onCancel: { controller.cancel() }
+            )
+            if let pending = controller.pendingCommand {
+                pendingCommandOverlay(pending)
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
     }
 
-    /// A heard command about to fire. Shows what and when, with an escape hatch —
-    /// the whole point of the grace period is that speech recognition mishears.
-    private func pendingCommandBanner(_ pending: DictationController.PendingCommand) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "bolt.fill")
-                .foregroundStyle(.yellow)
-            Text(pending.label)
-                .font(.system(size: 11, weight: .semibold))
-            Text(timerInterval: Date()...pending.firesAt, countsDown: true)
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Button("Now") { controller.firePendingCommand() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .font(.system(size: 11))
-            Button("Cancel") { controller.cancelPendingCommand() }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .font(.system(size: 11))
-                .keyboardShortcut(.escape, modifiers: [])
+    /// A heard command about to fire. Covers the whole transcript region so it's
+    /// impossible to miss, with targets big enough to hit without aiming: the left
+    /// half fires it now, the right half cancels, and the middle names the action.
+    private func pendingCommandOverlay(_ pending: DictationController.PendingCommand) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                controller.firePendingCommand()
+            } label: {
+                VStack(spacing: 6) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 26))
+                    Text("Now")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(Color.green.opacity(0.22))
+
+            VStack(spacing: 3) {
+                Text("About to")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text(pending.label)
+                    .font(.system(size: 13, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                Text(timerInterval: Date()...pending.firesAt, countsDown: true)
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 120)
+            .frame(maxHeight: .infinity)
+            .background(.regularMaterial)
+
+            Button {
+                controller.cancelPendingCommand()
+            } label: {
+                VStack(spacing: 6) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 24, weight: .semibold))
+                    Text("Cancel")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(Color.red.opacity(0.18))
+            .keyboardShortcut(.escape, modifiers: [])
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(Color.yellow.opacity(0.12))
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1)
+        )
     }
 
     private func errorBanner(_ message: String) -> some View {

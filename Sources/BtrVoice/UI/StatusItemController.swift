@@ -125,7 +125,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         submenu.addItem(toggle("Prefer on-device recognition", #selector(toggleOnDevice), settings.onDeviceOnly))
         submenu.addItem(toggle("Automatic punctuation", #selector(toggleAutoPunctuation), settings.autoPunctuation))
-        submenu.addItem(toggle("Spoken commands (“new line”, “scratch that”)", #selector(toggleVoiceCommands), settings.voiceCommandsEnabled))
+        submenu.addItem(toggle("Spoken commands", #selector(toggleVoiceCommands), settings.voiceCommandsEnabled))
         submenu.addItem(toggle("Panel follows the text caret", #selector(toggleFollowCaret), settings.followCaret))
         submenu.addItem(toggle("Stop listening after a pause", #selector(toggleStopOnSilence), settings.stopOnSilence))
         submenu.addItem(toggle("Clear buffer after inserting", #selector(toggleClearAfterCommit), settings.clearAfterCommit))
@@ -258,14 +258,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         let text = """
-        While dictating, these phrases act instead of being transcribed:
+        Say “do” plus a command while dictating. Without “do”, the words
+        are just transcribed. Each command shows a short countdown in the
+        panel before it fires — cancel it or fire it early from there.
 
-        “new line”, “new paragraph”, “tab key”
-        “scratch that” — delete the last sentence
-        “scratch word” — delete the last word
-        “clear all” / “start over” — empty the buffer
-        “commit that” — type the buffer into the focused app
-        “send it” — type it, then press Return
+        “do paste” — press ⌘V in the focused app
+        “do copy” — press ⌘C
+        “do select all” — press ⌘A
+        “do send it” / “do click” — click at the mouse pointer
 
         Keyboard: ⌥Space dictate · ⌥↩ insert · ⌥⎋ discard
         ⌘↩ insert from the panel · backspace button: ⌥-click deletes a word

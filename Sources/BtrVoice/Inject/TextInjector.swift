@@ -21,6 +21,7 @@ enum TextInjector {
     private static let tabKeyCode: CGKeyCode = 48
     private static let vKeyCode: CGKeyCode = 9
     private static let cKeyCode: CGKeyCode = 8
+    private static let aKeyCode: CGKeyCode = 0
     private static let deleteKeyCode: CGKeyCode = 51
 
     /// A private event source does not inherit the real hardware modifier state, so
@@ -120,11 +121,14 @@ enum TextInjector {
         case paste
         /// ⌘C
         case copy
+        /// ⌘A
+        case selectAll
 
         var keyCode: CGKeyCode {
             switch self {
             case .paste: return vKeyCode
             case .copy: return cKeyCode
+            case .selectAll: return aKeyCode
             }
         }
     }
