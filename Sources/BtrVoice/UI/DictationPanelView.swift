@@ -1,0 +1,264 @@
+import AppKit
+import SwiftUI
+
+/// The hover window: level meter, editable transcript, live partial, commit controls.
+struct DictationPanelView: View {
+
+    @ObservedObject var controller: DictationController
+    @ObservedObject private var buffer: TextBuffer
+    @ObservedObject private var targets: TargetTracker
+    @ObservedObject private var settings = Settings.shared
+    @ObservedObject private var permissions = PermissionMonitor.shared
+
+    init(controller: DictationController) {
+        self.controller = controller
+        self.buffer = controller.buffer
+        self.targets = controller.targets
+    }
+
+    private var isListening: Bool { controller.isListening }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().opacity(0.5)
+            transcript
+            if let pending = controller.pendingCommand {
+                pendingCommandBanner(pending)
+            }
+            if let error = controller.errorMessage {
+                errorBanner(error)
+            }
+            Divider().opacity(0.5)
+            footer
+        }
+        .frame(minWidth: 440, maxWidth: .infinity, minHeight: 230, maxHeight: .infinity)
+        // Vibrancy alone leaves the transcript competing with the wallpaper, so the
+        // material sits over a translucent window-coloured base for real contrast.
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+            ZStack {
+                shape.fill(.regularMaterial)
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        ZStack {
+            WindowDragHandle()
+            HStack(spacing: 10) {
+                Button {
+                    controller.toggleDictation()
+                } label: {
+                    Image(systemName: isListening ? "stop.circle.fill" : "mic.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(isListening ? Color.red : Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help(isListening ? "Stop listening (⌥Space)" : "Start listening (⌥Space)")
+
+                WaveformView(level: controller.level, active: isListening)
+                    .frame(width: 78)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(statusLine)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    if let name = targets.targetName {
+                        Text("→ \(name)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                if !permissions.accessibility {
+                    Button {
+                        Permissions.requestAccessibility()
+                        Permissions.openSettings(.accessibility)
+                    } label: {
+                        Label("Enable typing", systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.orange)
+                    .help("Accessibility access is needed to type into other apps")
+                }
+
+                Button {
+                    controller.cancel()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Discard and close (⌥⎋)")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+        }
+        .frame(height: 44)
+    }
+
+    private var statusLine: String {
+        if !controller.status.isEmpty { return controller.status }
+        if buffer.isEmpty { return "Press ⌥Space to dictate" }
+        return "\(buffer.displayText.count) characters staged"
+    }
+
+    // MARK: Transcript
+
+    // One editor holds everything: committed text (editable — select, retype,
+    // cursor anywhere) with the live grey tail appended in place. It fills whatever
+    // size the user resizes the window to, scrolling on overflow, and never resizes
+    // itself mid-sentence.
+    private var transcript: some View {
+        BufferTextView(
+            text: buffer.text,
+            partial: buffer.partial,
+            revision: buffer.revision,
+            placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
+            onEdit: { buffer.userDidEdit($0) },
+            onAdoptAll: { controller.adoptEditedText($0) },
+            onCommit: { controller.commit(send: false) },
+            onCancel: { controller.cancel() }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+
+    /// A heard command about to fire. Shows what and when, with an escape hatch —
+    /// the whole point of the grace period is that speech recognition mishears.
+    private func pendingCommandBanner(_ pending: DictationController.PendingCommand) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "bolt.fill")
+                .foregroundStyle(.yellow)
+            Text(pending.label)
+                .font(.system(size: 11, weight: .semibold))
+            Text(timerInterval: Date()...pending.firesAt, countsDown: true)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("Now") { controller.firePendingCommand() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .font(.system(size: 11))
+            Button("Cancel") { controller.cancelPendingCommand() }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .font(.system(size: 11))
+                .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Color.yellow.opacity(0.12))
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.system(size: 11))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Dismiss") { controller.dismissError() }
+                .buttonStyle(.borderless)
+                .font(.system(size: 11))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Color.orange.opacity(0.12))
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 8) {
+            // Enabled the moment *anything* is visible, live partial included: a
+            // mid-dictation Insert stops listening, waits for the tail to land, then
+            // types. Requiring finalised text first reads as a broken grey button.
+            Button {
+                controller.commit(send: false)
+            } label: {
+                Label("Insert", systemImage: "text.cursor")
+            }
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(buffer.isEmpty)
+            .help("Type the staged text into \(targets.targetName ?? "the focused app") (⌥↩)")
+
+            Button {
+                controller.commit(send: true)
+            } label: {
+                Label("Insert & Send", systemImage: "paperplane.fill")
+            }
+            .disabled(buffer.isEmpty)
+            .help("Type the text, then press Return in the target app")
+
+            // A real Backspace keypress in the target app, at its own cursor — for
+            // fixing what's already been inserted. The staged text above is edited
+            // directly by clicking into it.
+            Button {
+                controller.pressBackspaceInTarget(wordwise: NSEvent.modifierFlags.contains(.option))
+            } label: {
+                Image(systemName: "delete.left")
+            }
+            .disabled(!permissions.accessibility)
+            .help("Press Backspace in \(targets.targetName ?? "the focused app") (⌥-click: delete a word)")
+
+            Button {
+                controller.copyBufferToPasteboard()
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .disabled(buffer.isEmpty)
+            .help("Copy to clipboard")
+
+            Button {
+                controller.clearBuffer()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .disabled(buffer.isEmpty)
+            .help("Clear the buffer")
+
+            Spacer(minLength: 0)
+
+            Picker("", selection: $settings.newlineMode) {
+                ForEach(NewlineMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 168)
+            .help("How newlines are typed. Use Shift-Return in chat apps so Return doesn't send early.")
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+}
+
+/// Lets the user drag the borderless panel by its header. SwiftUI swallows the
+/// window-background drag, so the handle is an explicit AppKit view underneath.
+private struct WindowDragHandle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
+    }
+}
