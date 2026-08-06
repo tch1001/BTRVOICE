@@ -51,22 +51,14 @@ enum VoiceCommands {
         var actions: [BufferAction] = []
         var literal: [String] = []
 
-        // "Jarvis" is a wake word: everything after it, to the end of the
-        // utterance, is one instruction — commands inside it stay verbatim so
-        // the user can dictate rules that mention them. An optional "hey"
-        // immediately before the name is dropped with it.
-        if let jarvisIndex = words.firstIndex(where: { normalise($0) == "jarvis" }) {
-            let instruction = words[(jarvisIndex + 1)...].joined(separator: " ")
-                .trimmingCharacters(in: CharacterSet(charactersIn: ".,!?;: "))
-            var before = Array(words[..<jarvisIndex])
-            if let last = before.last, normalise(last) == "hey" { before.removeLast() }
-            if !before.isEmpty {
-                actions.append(contentsOf: parse(before.joined(separator: " "), enabled: true))
-            }
-            if !instruction.isEmpty {
-                actions.append(.jarvis(instruction))
-            }
-            return actions
+        // "Jarvis" is a wake word: the WHOLE utterance goes to the assistant
+        // verbatim — wake word, surrounding words, everything. The model reads
+        // the full sentence and works out the intent itself; slicing out "the
+        // instruction" here loses context and misinterprets. A bare "Jarvis"
+        // with nothing after it is treated as ordinary dictation.
+        if let jarvisIndex = words.firstIndex(where: { normalise($0) == "jarvis" }),
+           jarvisIndex + 1 < words.count {
+            return [.jarvis(segment.trimmingCharacters(in: .whitespacesAndNewlines))]
         }
 
         func flushLiteral() {

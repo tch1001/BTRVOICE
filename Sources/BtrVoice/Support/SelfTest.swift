@@ -62,28 +62,28 @@ enum SelfTest {
 
         print("Jarvis")
         do {
-            check("jarvis takes the rest of the utterance",
+            check("jarvis gets the whole utterance verbatim",
                   VoiceCommands.parse("Hey Jarvis, clean this up", enabled: true)
-                  == [.jarvis("clean this up")])
-            check("text before jarvis stays literal",
+                  == [.jarvis("Hey Jarvis, clean this up")])
+            check("text before the wake word is part of the utterance",
                   VoiceCommands.parse("hello world jarvis fix the last sentence", enabled: true)
-                  == [.insert("hello world"), .jarvis("fix the last sentence")])
-            check("bare jarvis with no instruction yields nothing",
-                  VoiceCommands.parse("Jarvis.", enabled: true) == [])
-            check("jarvis instruction keeps command words verbatim",
+                  == [.jarvis("hello world jarvis fix the last sentence")])
+            check("bare jarvis with nothing after it stays literal",
+                  VoiceCommands.parse("Jarvis.", enabled: true) == [.insert("Jarvis.")])
+            check("jarvis utterance keeps command words verbatim",
                   VoiceCommands.parse("jarvis remember do paste means control v", enabled: true)
-                  == [.jarvis("remember do paste means control v")])
+                  == [.jarvis("jarvis remember do paste means control v")])
         }
         do {
             check("remember is classified as a note",
-                  JarvisEngine.classify("remember that github dot com means tch1001.github.io")
+                  JarvisEngine.classify("Hey Jarvis, remember that github dot com means tch1001.github.io")
                   == .remember("github dot com means tch1001.github.io"))
             check("remember drops the filler word to",
-                  JarvisEngine.classify("remember to spell my name as Fish")
+                  JarvisEngine.classify("jarvis remember to spell my name as Fish")
                   == .remember("spell my name as Fish"))
-            check("everything else is an edit",
-                  JarvisEngine.classify("replace github dot com with the real URL")
-                  == .edit("replace github dot com with the real URL"))
+            check("everything else is an edit with the full utterance",
+                  JarvisEngine.classify("Jarvis, replace github dot com with the real URL")
+                  == .edit("Jarvis, replace github dot com with the real URL"))
         }
         do {
             check("sanitize strips echoed tags and newlines",

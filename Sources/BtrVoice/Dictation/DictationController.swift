@@ -233,18 +233,14 @@ final class DictationController: ObservableObject {
             JarvisNotes.shared.add(note)
             status = "Jarvis will remember that"
 
-        case .edit(let request):
+        case .edit(let utterance):
             buffer.flushPartial()
             let text = buffer.committedText
-            guard !text.isEmpty else {
-                status = "Jarvis: nothing staged to work on"
-                return
-            }
             status = "Jarvis is thinking…"
-            Log.write("jarvis: edit — \(request)")
+            Log.write("jarvis: edit — \(utterance)")
             Task { [weak self] in
                 do {
-                    let result = try await JarvisEngine.rewrite(text, instruction: request)
+                    let result = try await JarvisEngine.rewrite(text, utterance: utterance)
                     await MainActor.run {
                         guard let self else { return }
                         self.buffer.replace(with: result)
