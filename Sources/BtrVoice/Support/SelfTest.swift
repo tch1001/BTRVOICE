@@ -60,6 +60,32 @@ enum SelfTest {
             check("empty input yields nothing", actions.isEmpty, "\(actions)")
         }
 
+        print("Jarvis")
+        do {
+            check("jarvis takes the rest of the utterance",
+                  VoiceCommands.parse("Hey Jarvis, clean this up", enabled: true)
+                  == [.jarvis("clean this up")])
+            check("text before jarvis stays literal",
+                  VoiceCommands.parse("hello world jarvis fix the last sentence", enabled: true)
+                  == [.insert("hello world"), .jarvis("fix the last sentence")])
+            check("bare jarvis with no instruction yields nothing",
+                  VoiceCommands.parse("Jarvis.", enabled: true) == [])
+            check("jarvis instruction keeps command words verbatim",
+                  VoiceCommands.parse("jarvis remember do paste means control v", enabled: true)
+                  == [.jarvis("remember do paste means control v")])
+        }
+        do {
+            check("remember is classified as a note",
+                  JarvisEngine.classify("remember that github dot com means tch1001.github.io")
+                  == .remember("github dot com means tch1001.github.io"))
+            check("remember drops the filler word to",
+                  JarvisEngine.classify("remember to spell my name as Fish")
+                  == .remember("spell my name as Fish"))
+            check("everything else is an edit",
+                  JarvisEngine.classify("replace github dot com with the real URL")
+                  == .edit("replace github dot com with the real URL"))
+        }
+
         print("TextBuffer")
         do {
             let buffer = TextBuffer()

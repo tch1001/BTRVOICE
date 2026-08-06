@@ -82,6 +82,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        menu.addItem(jarvisItem())
         menu.addItem(settingsItem())
 
         let missing = Permissions.missing
@@ -117,6 +118,47 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         quitItem.keyEquivalent = "q"
         quitItem.keyEquivalentModifierMask = [.command]
         menu.addItem(quitItem)
+    }
+
+    private func jarvisItem() -> NSMenuItem {
+        let parent = NSMenuItem(title: "Jarvis", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+
+        if JarvisEngine.isAvailable {
+            submenu.addItem(toggle("Clean up dictation automatically", #selector(toggleJarvisAuto), settings.jarvisAutoCleanup))
+        } else {
+            let unavailable = NSMenuItem(title: "Unavailable — needs Apple Intelligence", action: nil, keyEquivalent: "")
+            unavailable.isEnabled = false
+            submenu.addItem(unavailable)
+        }
+
+        submenu.addItem(.separator())
+        let notes = JarvisNotes.shared.notes
+        if notes.isEmpty {
+            let empty = NSMenuItem(title: "No notes yet — say “Jarvis, remember …”", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            submenu.addItem(empty)
+        } else {
+            let header = NSMenuItem(title: "Notes (\(notes.count))", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            submenu.addItem(header)
+            for note in notes {
+                let entry = NSMenuItem(title: Self.truncate(note.text), action: nil, keyEquivalent: "")
+                entry.toolTip = note.text
+                let noteMenu = NSMenu()
+                let delete = NSMenuItem(title: "Delete This Note", action: #selector(deleteJarvisNote(_:)), keyEquivalent: "")
+                delete.target = self
+                delete.representedObject = note.id.uuidString
+                noteMenu.addItem(delete)
+                entry.submenu = noteMenu
+                submenu.addItem(entry)
+            }
+            submenu.addItem(.separator())
+            submenu.addItem(item("Delete All Notes…", action: #selector(deleteAllJarvisNotes)))
+        }
+
+        parent.submenu = submenu
+        return parent
     }
 
     private func settingsItem() -> NSMenuItem {
@@ -222,6 +264,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleStopOnSilence() { settings.stopOnSilence.toggle() }
     @objc private func toggleClearAfterCommit() { settings.clearAfterCommit.toggle() }
     @objc private func toggleHideAfterCommit() { settings.hideAfterCommit.toggle() }
+    @objc private func toggleJarvisAuto() { settings.jarvisAutoCleanup.toggle() }
+
+    @objc private func deleteJarvisNote(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let id = UUID(uuidString: raw) else { return }
+        JarvisNotes.shared.delete(id: id)
+    }
+
+    @objc private func deleteAllJarvisNotes() {
+        let alert = NSAlert()
+        alert.messageText = "Delete all of Jarvis's notes?"
+        alert.informativeText = "Jarvis will forget every saved rule. This cannot be undone."
+        alert.addButton(withTitle: "Delete All")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            JarvisNotes.shared.deleteAll()
+        }
+    }
 
     @objc private func selectEngine(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
@@ -267,6 +327,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         “do select all” — press ⌘A
         “do click” — click at the mouse pointer
         “do send it” — insert the buffer, then press Return
+
+        Say “Jarvis” (or “hey Jarvis”) followed by an instruction:
+        “Jarvis, clean this up” — rewrite the staged text
+        “Jarvis, replace X with Y” — any edit you can describe
+        “Jarvis, remember …” — save a standing rule Jarvis applies
+        from then on. Manage notes in the Jarvis menu.
 
         Keyboard: ⌥Space dictate · ⌥↩ insert · ⌥⎋ discard
         ⌘↩ insert from the panel · backspace button: ⌥-click deletes a word

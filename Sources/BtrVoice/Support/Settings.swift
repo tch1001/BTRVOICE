@@ -68,6 +68,9 @@ final class Settings: ObservableObject {
     @Published var hideAfterCommit: Bool { didSet { store.set(hideAfterCommit, forKey: Key.hideAfterCommit) } }
     @Published var localeIdentifier: String { didSet { store.set(localeIdentifier, forKey: Key.locale) } }
     @Published var engineChoice: SpeechEngineChoice { didSet { store.set(engineChoice.rawValue, forKey: Key.engineChoice) } }
+    /// When on, Jarvis cleans up every utterance automatically; when off, only
+    /// on an explicit "Jarvis, …" command.
+    @Published var jarvisAutoCleanup: Bool { didSet { store.set(jarvisAutoCleanup, forKey: Key.jarvisAutoCleanup) } }
 
     private enum Key {
         static let onDeviceOnly = "onDeviceOnly"
@@ -82,6 +85,7 @@ final class Settings: ObservableObject {
         static let hideAfterCommit = "hideAfterCommit"
         static let locale = "localeIdentifier"
         static let engineChoice = "engineChoice"
+        static let jarvisAutoCleanup = "jarvisAutoCleanup"
     }
 
     private init() {
@@ -100,6 +104,7 @@ final class Settings: ObservableObject {
             Key.hideAfterCommit: false,
             Key.locale: Locale.current.identifier,
             Key.engineChoice: SpeechEngineChoice.automatic.rawValue,
+            Key.jarvisAutoCleanup: false,
         ])
 
         onDeviceOnly = store.bool(forKey: Key.onDeviceOnly)
@@ -114,6 +119,7 @@ final class Settings: ObservableObject {
         hideAfterCommit = store.bool(forKey: Key.hideAfterCommit)
         localeIdentifier = store.string(forKey: Key.locale) ?? Locale.current.identifier
         engineChoice = SpeechEngineChoice(rawValue: store.string(forKey: Key.engineChoice) ?? "") ?? .automatic
+        jarvisAutoCleanup = store.bool(forKey: Key.jarvisAutoCleanup)
     }
 
     /// Whether the modern engine can actually run here, so pickers can grey it out.

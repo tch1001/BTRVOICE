@@ -175,6 +175,91 @@ final class DictationController: ObservableObject {
         status = "Copied to clipboard"
     }
 
+    // MARK: - Segment application & Jarvis
+
+    /// Applies a finalised segment's actions to the buffer and routes any
+    /// escalated command. Safe to call from any thread.
+    private func applySegmentActions(_ actions: [BufferAction]) {
+        let escalated = buffer.apply(actions)
+        guard let request = escalated.first else { return }
+        // A spoken command would otherwise re-enter the engine from inside its
+        // own callback; let the current one unwind first.
+        DispatchQueue.main.async {
+            if case .jarvis(let instruction) = request {
+                self.handleJarvis(instruction)
+            } else {
+                self.stagePendingCommand(request)
+            }
+        }
+    }
+
+    /// Serialises auto-cleanup so overlapping segments land in spoken order.
+    private var jarvisChain: Task<Void, Never>?
+
+    private func enqueueJarvisAutoClean(_ actions: [BufferAction]) {
+        let previous = jarvisChain
+        jarvisChain = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            var cleaned: [BufferAction] = []
+            for action in actions {
+                if case .insert(let fragment) = action {
+                    let result = (try? await JarvisEngine.cleanup(fragment)) ?? fragment
+                    cleaned.append(.insert(result))
+                } else {
+                    cleaned.append(action)
+                }
+            }
+            self.applySegmentActions(cleaned)
+        }
+    }
+
+    /// A spoken "Jarvis, …" instruction. "remember" is stored locally; anything
+    /// else rewrites the staged buffer via the on-device model. Both act on the
+    /// local buffer only, and edits are undoable — so no confirmation countdown.
+    private func handleJarvis(_ instruction: String) {
+        guard JarvisEngine.isAvailable else {
+            status = "Jarvis needs Apple Intelligence on this Mac"
+            Log.write("jarvis: unavailable — instruction dropped: \(instruction)")
+            return
+        }
+
+        switch JarvisEngine.classify(instruction) {
+        case .remember(let note):
+            guard !note.isEmpty else {
+                status = "Jarvis: remember what?"
+                return
+            }
+            JarvisNotes.shared.add(note)
+            status = "Jarvis will remember that"
+
+        case .edit(let request):
+            buffer.flushPartial()
+            let text = buffer.committedText
+            guard !text.isEmpty else {
+                status = "Jarvis: nothing staged to work on"
+                return
+            }
+            status = "Jarvis is thinking…"
+            Log.write("jarvis: edit — \(request)")
+            Task { [weak self] in
+                do {
+                    let result = try await JarvisEngine.rewrite(text, instruction: request)
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.buffer.replace(with: result)
+                        self.status = "Jarvis updated the text (undo: ⌘Z in panel)"
+                    }
+                } catch {
+                    await MainActor.run {
+                        self?.status = "Jarvis failed: \(error.localizedDescription)"
+                        Log.write("jarvis: edit failed — \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Voice commands
 
     /// Grace period between hearing a command and performing it.
@@ -200,7 +285,7 @@ final class DictationController: ObservableObject {
         case .selectAllInTarget: label = "Select All (⌘A)"
         case .clickAtPointer: label = "Click"
         case .commitAndSend: label = "Insert & Send"
-        case .insert: return
+        case .insert, .jarvis: return
         }
         pendingCommandTimer?.invalidate()
         pendingCommand = PendingCommand(
@@ -264,7 +349,7 @@ final class DictationController: ObservableObject {
         case .commitAndSend:
             Log.write("voice command: insert & send")
             commit(send: true)
-        case .insert:
+        case .insert, .jarvis:
             break
         }
     }
@@ -305,10 +390,13 @@ final class DictationController: ObservableObject {
         engine.onSegmentFinal = { [weak self] text in
             guard let self else { return }
             let actions = VoiceCommands.parse(text, enabled: self.settings.voiceCommandsEnabled)
-            let escalated = self.buffer.apply(actions)
-            guard let request = escalated.first else { return }
-            DispatchQueue.main.async {
-                self.stagePendingCommand(request)
+
+            if self.settings.jarvisAutoCleanup, JarvisEngine.isAvailable {
+                // Auto mode: every plain utterance goes through Jarvis first. The
+                // chain keeps segments in spoken order even when cleanups overlap.
+                self.enqueueJarvisAutoClean(actions)
+            } else {
+                self.applySegmentActions(actions)
             }
         }
         engine.onFinished = { [weak self] in
