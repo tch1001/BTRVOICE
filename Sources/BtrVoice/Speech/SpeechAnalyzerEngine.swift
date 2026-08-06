@@ -82,11 +82,19 @@ final class SpeechAnalyzerEngine: TranscriptionEngine {
             )
             self.transcriber = transcriber
 
-            // First use on a fresh OS install: the model may need downloading.
+            // The inventory hands back an installation request every session even when
+            // the assets are already on disk — completing it then takes ~10ms. Only a
+            // genuinely slow install (first use, OS update, eviction) is worth
+            // announcing, so the status waits out the no-op case.
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-                emitStatus("Downloading the speech model…")
-                Log.write("speechanalyzer: downloading model assets for \(supported.identifier)")
+                let announce = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    self?.emitStatus("Downloading the speech model…")
+                }
+                Log.write("speechanalyzer: installing model assets for \(supported.identifier)")
                 try await request.downloadAndInstall()
+                announce.cancel()
                 Log.write("speechanalyzer: model assets installed")
             }
 
@@ -106,6 +114,10 @@ final class SpeechAnalyzerEngine: TranscriptionEngine {
             try await analyzer.start(inputSequence: stream)
 
             openGate(continuation: continuation, format: format)
+            // Setup races the controller's "Listening" status: it writes that label
+            // the moment start() returns, and anything we emitted since (the download
+            // notice) would otherwise sit on screen for the whole session.
+            emitStatus("Listening — \(displayName)")
         } catch {
             guard !cancelled else { return }
             Log.write("speechanalyzer: setup failed — \(error.localizedDescription)")
