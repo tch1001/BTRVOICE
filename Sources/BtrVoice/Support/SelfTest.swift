@@ -85,6 +85,16 @@ enum SelfTest {
                   JarvisEngine.classify("replace github dot com with the real URL")
                   == .edit("replace github dot com with the real URL"))
         }
+        do {
+            check("sanitize strips echoed tags and newlines",
+                  JarvisEngine.sanitize("<text>\nhello\nworld\n</text>") == "hello world")
+            check("sanitize collapses whitespace runs",
+                  JarvisEngine.sanitize("  a   b\t\tc \n d ") == "a b c d")
+            check("sanitize keeps math comparisons intact",
+                  JarvisEngine.sanitize("x < 3 and y > 5") == "x < 3 and y > 5")
+            check("sanitize leaves clean text alone",
+                  JarvisEngine.sanitize("already clean") == "already clean")
+        }
 
         print("TextBuffer")
         do {

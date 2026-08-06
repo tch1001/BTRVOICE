@@ -94,7 +94,10 @@ final class Settings: ObservableObject {
             Key.autoPunctuation: true,
             Key.voiceCommands: true,
             Key.injectionMode: InjectionMode.auto.rawValue,
-            Key.newlineMode: NewlineMode.returnKey.rawValue,
+            // Shift-Return by default: a newline that slipped into the buffer must
+            // not press Enter and fire the message off early. Terminal users can
+            // switch to the Return key in the panel's picker.
+            Key.newlineMode: NewlineMode.shiftReturn.rawValue,
             Key.followCaret: true,
             Key.stopOnSilence: false,
             Key.silenceTimeout: 2.5,
