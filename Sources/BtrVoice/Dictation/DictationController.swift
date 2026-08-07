@@ -152,16 +152,24 @@ final class DictationController: ObservableObject {
     }
 
     /// The panel's ⌫ button: a literal Backspace keystroke in the target app.
-    /// The panel is non-activating, so the target still has focus when the button is
-    /// clicked — the event lands at its cursor with no focus juggling needed.
+    /// Clicking a panel control can leave the panel key (its editor is a text
+    /// view), so the keystroke would land in our own buffer instead of the
+    /// target — hand focus back first, the same way inserting does.
     func pressBackspaceInTarget(wordwise: Bool) {
         guard Permissions.accessibilityGranted else {
             fail("Accessibility access is required to press keys in other apps.")
             return
         }
-        TextInjector.pressBackspace(wordwise: wordwise) { [weak self] result in
-            if case .failure(let error) = result {
-                self?.fail(error.localizedDescription)
+        releaseFocus?()
+        targets.focusTarget { [weak self] focused in
+            guard let self else { return }
+            if !focused {
+                self.status = "Could not focus \(self.targets.targetName ?? "the target app") — pressing anyway"
+            }
+            TextInjector.pressBackspace(wordwise: wordwise) { [weak self] result in
+                if case .failure(let error) = result {
+                    self?.fail(error.localizedDescription)
+                }
             }
         }
     }
@@ -594,10 +602,10 @@ final class DictationController: ObservableObject {
         // Two commits in flight would interleave keystrokes in the target app.
         guard phase != .committing else { return }
 
-        // If recognition ended without a final result, take what's on screen rather
-        // than silently dropping it.
-        buffer.flushPartial()
-
+        // Only confirmed (white) text is typed. The grey in-flight tail is still
+        // being recognised — inserting it would commit words the user hasn't seen
+        // settle, and "insert & send" would fire them off mid-sentence. It stays
+        // staged for the next insert.
         let text = buffer.committedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             status = "Nothing to insert"
@@ -639,7 +647,9 @@ final class DictationController: ObservableObject {
                 switch result {
                 case .success:
                     self.status = "Inserted into \(targetName)"
-                    if self.settings.clearAfterCommit { self.buffer.clear() }
+                    // Clear only what was typed — an in-flight grey tail wasn't
+                    // inserted, so it stays staged for the next insert.
+                    if self.settings.clearAfterCommit { self.buffer.clearCommitted() }
                     self.phase = .idle
                     if self.resumeAfterCommit {
                         self.resumeAfterCommit = false

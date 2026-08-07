@@ -130,6 +130,15 @@ final class TextBuffer: ObservableObject {
         revision += 1
     }
 
+    /// Drops the committed text but keeps the live grey tail — used after an
+    /// insert, which only types confirmed text.
+    func clearCommitted() {
+        guard !text.isEmpty else { return }
+        pushUndo()
+        text = ""
+        revision += 1
+    }
+
     func undo() {
         guard let previous = undoStack.popLast() else { return }
         text = previous

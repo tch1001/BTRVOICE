@@ -169,6 +169,15 @@ enum SelfTest {
         }
         do {
             let buffer = TextBuffer()
+            buffer.apply([.insert("confirmed words")])
+            buffer.setPartial("still in flight")
+            buffer.clearCommitted()
+            check("clearCommitted drops confirmed text only",
+                  buffer.committedText.isEmpty && buffer.partial == "still in flight",
+                  "\(buffer.committedText.debugDescription) / \(buffer.partial)")
+        }
+        do {
+            let buffer = TextBuffer()
             buffer.apply([.insert("hi 👍🏽")])
             buffer.deleteLastCharacter()
             check("backspace removes a whole emoji", buffer.committedText == "hi ", buffer.committedText.debugDescription)
