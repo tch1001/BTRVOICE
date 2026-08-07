@@ -149,6 +149,88 @@ enum TextInjector {
         }
     }
 
+    // MARK: - Arbitrary key combos ("cmd+shift+p")
+
+    /// Key names → virtual keycodes for combo parsing.
+    private static let keyCodes: [String: CGKeyCode] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
+        "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25, "7": 26,
+        "-": 27, "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35,
+        "return": 36, "enter": 36, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42,
+        ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "tab": 48, "space": 49, "`": 50,
+        "delete": 51, "backspace": 51, "escape": 53, "esc": 53,
+        "left": 123, "right": 124, "down": 125, "up": 126,
+    ]
+
+    private static let modifierFlags: [String: CGEventFlags] = [
+        "cmd": .maskCommand, "command": .maskCommand,
+        "shift": .maskShift,
+        "opt": .maskAlternate, "option": .maskAlternate, "alt": .maskAlternate,
+        "ctrl": .maskControl, "control": .maskControl,
+    ]
+
+    /// Parses "cmd+shift+p" (order-insensitive, case-insensitive). Returns nil
+    /// for unknown keys, no key, or more than one non-modifier key.
+    /// Internal rather than private so `--self-test` can exercise it.
+    static func parseCombo(_ text: String) -> (key: CGKeyCode, flags: CGEventFlags, display: String)? {
+        var flags: CGEventFlags = []
+        var key: (name: String, code: CGKeyCode)?
+        for part in text.lowercased().split(whereSeparator: { $0 == "+" || $0 == "-" || $0 == " " }) {
+            let name = String(part).trimmingCharacters(in: .whitespaces)
+            if let modifier = modifierFlags[name] {
+                flags.insert(modifier)
+            } else if let code = keyCodes[name] {
+                guard key == nil else { return nil }
+                key = (name, code)
+            } else {
+                return nil
+            }
+        }
+        guard let key else { return nil }
+        var display = ""
+        if flags.contains(.maskControl) { display += "⌃" }
+        if flags.contains(.maskAlternate) { display += "⌥" }
+        if flags.contains(.maskShift) { display += "⇧" }
+        if flags.contains(.maskCommand) { display += "⌘" }
+        display += key.name.count == 1 ? key.name.uppercased() : key.name.capitalized
+        return (key.code, flags, display)
+    }
+
+    /// Presses an arbitrary chord in the frontmost app — every modifier goes
+    /// down as its own event first, for apps that watch flagsChanged.
+    static func pressCombo(key: CGKeyCode, flags: CGEventFlags, completion: @escaping (Result<Void, InjectionError>) -> Void) {
+        guard AXIsProcessTrusted() else {
+            completion(.failure(.notTrusted))
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let source = makeSource() else {
+                DispatchQueue.main.async { completion(.failure(.eventSourceUnavailable)) }
+                return
+            }
+            let modifierKeys: [(CGEventFlags, CGKeyCode)] = [
+                (.maskControl, 59), (.maskAlternate, 58), (.maskShift, 56), (.maskCommand, 55),
+            ]
+            let held = modifierKeys.filter { flags.contains($0.0) }
+            for (_, code) in held {
+                if let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true) {
+                    down.flags = flags
+                    down.post(tap: .cgSessionEventTap)
+                    usleep(8_000)
+                }
+            }
+            postKey(key, flags: flags, source: source)
+            for (_, code) in held.reversed() {
+                if let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false) {
+                    up.flags = []
+                    up.post(tap: .cgSessionEventTap)
+                }
+            }
+            DispatchQueue.main.async { completion(.success(())) }
+        }
+    }
+
     /// Left-clicks at wherever the pointer currently is. The panel is non-activating,
     /// so the click lands on whatever app is under the pointer.
     static func clickAtPointer(completion: @escaping (Result<Void, InjectionError>) -> Void) {

@@ -18,6 +18,8 @@ enum BufferAction: Equatable {
     /// "hey Jarvis, …" — everything after the name is an instruction for the
     /// on-device assistant (edit the buffer, or "remember …" a note).
     case jarvis(String)
+    /// GPT Editor: press an arbitrary chord ("cmd+shift+p") in the target app.
+    case pressKeys(String)
 }
 
 /// Turns spoken control phrases into buffer actions, so the user never has to

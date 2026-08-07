@@ -57,6 +57,16 @@ enum SelfTest {
             check("unknown bracket junk is stripped", text4 == "keep this clean", text4)
         }
         do {
+            let combo = TextInjector.parseCombo("cmd+shift+p")
+            check("cmd+shift+p parses", combo?.key == 35 && combo?.display == "⇧⌘P",
+                  "\(String(describing: combo))")
+            check("bare key parses", TextInjector.parseCombo("escape")?.display == "Escape")
+            check("space separators work", TextInjector.parseCombo("ctrl c")?.display == "⌃C")
+            check("unknown key rejected", TextInjector.parseCombo("cmd+banana") == nil)
+            check("two plain keys rejected", TextInjector.parseCombo("a+b") == nil)
+            check("modifier only rejected", TextInjector.parseCombo("cmd+shift") == nil)
+        }
+        do {
             check("command words without the trigger stay literal",
                   VoiceCommands.parse("please paste the text", enabled: true)
                   == [.insert("please paste the text")])

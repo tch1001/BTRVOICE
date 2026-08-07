@@ -159,18 +159,25 @@ struct DictationPanelView: View {
     /// Draggable divider for the brain column. Drag left to widen, right to
     /// shrink; clamped so neither side can be crushed.
     @State private var brainDragStartWidth: Double?
+    @State private var brainHandleHovered = false
 
     private var brainResizeHandle: some View {
         ZStack {
             // The panel moves on background drags; the resize strip must not
             // double as a window-move handle.
             WindowDragBlocker()
-            Divider().opacity(0.5)
-            Rectangle().fill(Color.clear)
+            // A visible track + grip so it reads as "drag me", not just a line.
+            Rectangle()
+                .fill(brainHandleHovered ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.05))
+            Capsule()
+                .fill(Color.secondary.opacity(brainHandleHovered ? 0.9 : 0.45))
+                .frame(width: 3, height: 36)
         }
-        .frame(width: 9)
+        .frame(width: 10)
+        .animation(.easeOut(duration: 0.12), value: brainHandleHovered)
         .contentShape(Rectangle())
         .onHover { inside in
+            brainHandleHovered = inside
             if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
         }
         .gesture(

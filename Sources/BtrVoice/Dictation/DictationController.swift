@@ -284,6 +284,8 @@ final class DictationController: ObservableObject {
         case .clickAtPointer: label = "Click"
         case .commit: label = "Insert"
         case .commitAndSend: label = "Insert & Send"
+        case .pressKeys(let combo):
+            label = "Press \(TextInjector.parseCombo(combo)?.display ?? combo)"
         case .insert, .jarvis: return
         }
         pendingCommandTimer?.invalidate()
@@ -351,6 +353,14 @@ final class DictationController: ObservableObject {
         case .commitAndSend:
             Log.write("voice command: insert & send")
             commit(send: true)
+        case .pressKeys(let combo):
+            guard let parsed = TextInjector.parseCombo(combo) else {
+                status = "Unknown key combo: \(combo)"
+                return
+            }
+            Log.write("voice command: press \(parsed.display)")
+            status = "Pressed \(parsed.display)"
+            TextInjector.pressCombo(key: parsed.key, flags: parsed.flags, completion: done)
         case .insert, .jarvis:
             break
         }

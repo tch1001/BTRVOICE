@@ -247,6 +247,21 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                     ],
                     [
                         "type": "function",
+                        "name": "press_keys",
+                        "description": "Press a keyboard shortcut in the app the user is working in. Call this when the user asks you to press keys in ANY phrasing — 'press command shift P', 'hit escape', 'do control C'. The app asks the user to confirm before pressing.",
+                        "parameters": [
+                            "type": "object",
+                            "properties": [
+                                "combo": [
+                                    "type": "string",
+                                    "description": "The chord as modifier+…+key, e.g. 'cmd+shift+p', 'ctrl+c', 'escape', 'cmd+up'. Modifiers: cmd, shift, opt, ctrl. Keys: letters, digits, punctuation, return, tab, space, escape, delete, arrows (up/down/left/right).",
+                                ],
+                            ],
+                            "required": ["combo"],
+                        ],
+                    ],
+                    [
+                        "type": "function",
                         "name": "app_command",
                         "description": "Perform an action in the dictation app. Call this whenever the user asks for one of these actions in ANY phrasing — 'do copy', 'copy the text', 'copy the highlighted text' all mean copy. The app shows the user a confirmation before executing, so calling this is safe.",
                         "parameters": [
@@ -398,6 +413,16 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 EditorActivityLog.post(.tool, "Requested app action: \(actionName) (awaiting your confirmation)")
                 emit { self.onCommand?(action) }
             }
+        case "press_keys":
+            if let combo = args["combo"] as? String,
+               let parsed = TextInjector.parseCombo(combo) {
+                output = #"{"status":"queued","note":"the user is being asked to confirm"}"#
+                Log.write("gpt-editor: press keys — \(parsed.display)")
+                EditorActivityLog.post(.tool, "Requested keypress: \(parsed.display) (awaiting your confirmation)")
+                emit { self.onCommand?(.pressKeys(combo)) }
+            } else {
+                output = #"{"status":"error","detail":"unrecognized combo; use modifier+key like cmd+shift+p"}"#
+            }
         default:
             break
         }
@@ -445,6 +470,8 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         - When the user CORRECTS or refines a rule you already have, call \
         update_rule with that rule's number from your standing-rules list — never \
         create a near-duplicate with remember_rule.
+        - When the user asks you to press keys ("press command shift P", "hit \
+        escape"), call press_keys with the chord — never transcribe the request.
         \(notes.isEmpty ? "" : "\nStanding rules from the user (apply these):\n\(notes)")
         """
     }
