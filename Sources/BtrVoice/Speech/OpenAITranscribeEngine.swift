@@ -156,7 +156,7 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
             currentPartial += delta
             let partial = currentPartial
             lock.unlock()
-            onPartial?(partial)
+            emit { self.onPartial?(partial) }
 
         case "conversation.item.input_audio_transcription.completed":
             guard fresh(event) else { return }
@@ -165,7 +165,7 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
             lock.unlock()
             let transcript = ((event["transcript"] as? String) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !transcript.isEmpty { onSegmentFinal?(transcript) }
+            if !transcript.isEmpty { emit { self.onSegmentFinal?(transcript) } }
 
         case "error":
             let message = (event["error"] as? [String: Any])?["message"] as? String ?? text
@@ -208,9 +208,18 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
         if !alreadyCancelled {
-            if !leftover.isEmpty { onSegmentFinal?(leftover) }
-            onFinished?()
+            emit {
+                if !leftover.isEmpty { self.onSegmentFinal?(leftover) }
+                self.onFinished?()
+            }
         }
+    }
+
+    /// UI-facing callbacks must land on the main thread: WebSocket receive
+    /// callbacks arrive on a URLSession queue, and letting them reach AppKit
+    /// (panel ordering, published state) crashes with EXC_BREAKPOINT.
+    private func emit(_ block: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: block)
     }
 
     private func sendSessionConfig(includeVAD: Bool) {
@@ -247,7 +256,7 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
         lock.unlock()
         guard !already else { return }
         Log.write("openai-stt: ERROR — \(error.localizedDescription)")
-        onError?(error)
+        emit { self.onError?(error) }
     }
 
     // MARK: - Audio conversion
