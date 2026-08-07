@@ -36,6 +36,7 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
     private var suppressUntil = Date.distantPast
     private var finishTimer: Timer?
     private var errorReported = false
+    private var vadRetried = false
 
     enum EngineError: LocalizedError {
         case noKey
@@ -134,16 +135,10 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
 
         switch type {
         case "session.created", "transcription_session.created":
-            send(["type": "session.update", "session": [
-                "type": "transcription",
-                "audio": [
-                    "input": [
-                        "format": ["type": "audio/pcm", "rate": 24_000],
-                        "transcription": ["model": model],
-                        "turn_detection": ["type": "server_vad"],
-                    ],
-                ],
-            ]])
+            // Live-transcribe models stream continuously and reject VAD config;
+            // whisper-style models need server VAD to segment turns. Start with
+            // VAD and drop it on rejection, so new models work either way.
+            sendSessionConfig(includeVAD: model.contains("whisper"))
 
         case "session.updated", "transcription_session.updated":
             lock.lock()
@@ -174,6 +169,14 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
 
         case "error":
             let message = (event["error"] as? [String: Any])?["message"] as? String ?? text
+            // The session config was too opinionated for this model — retry once
+            // with the rejected knob removed instead of killing the session.
+            if message.localizedCaseInsensitiveContains("turn detection"), !vadRetried {
+                vadRetried = true
+                Log.write("openai-stt: model rejected VAD config, retrying without — \(message)")
+                sendSessionConfig(includeVAD: false)
+                return
+            }
             // A commit on an empty buffer while finishing isn't worth surfacing.
             lock.lock(); let benign = finishing || cancelled; lock.unlock()
             if benign {
@@ -197,10 +200,29 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
         lock.lock()
         let alreadyCancelled = cancelled
         cancelled = true
+        // No completion event arrived for the tail — the words are on screen as
+        // a partial, so the user is entitled to them as a final.
+        let leftover = currentPartial.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentPartial = ""
         lock.unlock()
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
-        if !alreadyCancelled { onFinished?() }
+        if !alreadyCancelled {
+            if !leftover.isEmpty { onSegmentFinal?(leftover) }
+            onFinished?()
+        }
+    }
+
+    private func sendSessionConfig(includeVAD: Bool) {
+        var input: [String: Any] = [
+            "format": ["type": "audio/pcm", "rate": 24_000],
+            "transcription": ["model": model],
+        ]
+        if includeVAD { input["turn_detection"] = ["type": "server_vad"] }
+        send(["type": "session.update", "session": [
+            "type": "transcription",
+            "audio": ["input": input],
+        ]])
     }
 
     private func send(_ event: [String: Any]) {
