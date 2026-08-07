@@ -97,6 +97,11 @@ final class Settings: ObservableObject {
     @Published var jarvisBackend: JarvisBackend { didSet { store.set(jarvisBackend.rawValue, forKey: Key.jarvisBackend) } }
     /// The "brain" column in the panel while the GPT Editor engine is active.
     @Published var showEditorBrain: Bool { didSet { store.set(showEditorBrain, forKey: Key.showEditorBrain) } }
+    @Published var editorBrainWidth: Double { didSet { store.set(editorBrainWidth, forKey: Key.editorBrainWidth) } }
+
+    /// Drag limits for the brain column, so it can't crush the transcript or
+    /// swallow the panel.
+    static let editorBrainWidthRange: ClosedRange<Double> = 160...480
 
     private enum Key {
         static let onDeviceOnly = "onDeviceOnly"
@@ -114,6 +119,7 @@ final class Settings: ObservableObject {
         static let jarvisAutoCleanup = "jarvisAutoCleanup"
         static let jarvisBackend = "jarvisBackend"
         static let showEditorBrain = "showEditorBrain"
+        static let editorBrainWidth = "editorBrainWidth"
     }
 
     private init() {
@@ -138,6 +144,7 @@ final class Settings: ObservableObject {
             Key.jarvisAutoCleanup: false,
             Key.jarvisBackend: JarvisBackend.onDevice.rawValue,
             Key.showEditorBrain: true,
+            Key.editorBrainWidth: 250.0,
         ])
 
         onDeviceOnly = store.bool(forKey: Key.onDeviceOnly)
@@ -155,6 +162,10 @@ final class Settings: ObservableObject {
         jarvisAutoCleanup = store.bool(forKey: Key.jarvisAutoCleanup)
         jarvisBackend = JarvisBackend(rawValue: store.string(forKey: Key.jarvisBackend) ?? "") ?? .onDevice
         showEditorBrain = store.bool(forKey: Key.showEditorBrain)
+        editorBrainWidth = min(
+            max(store.double(forKey: Key.editorBrainWidth), Self.editorBrainWidthRange.lowerBound),
+            Self.editorBrainWidthRange.upperBound
+        )
     }
 
     /// Whether the modern engine can actually run here, so pickers can grey it out.

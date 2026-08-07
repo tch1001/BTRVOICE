@@ -149,11 +149,39 @@ struct DictationPanelView: View {
 
             // The editor's brain, inline: what it hears, writes, and does.
             if editorEngineActive, settings.showEditorBrain {
-                Divider().opacity(0.5)
+                brainResizeHandle
                 EditorActivityView(log: .shared)
-                    .frame(width: 250)
+                    .frame(width: CGFloat(settings.editorBrainWidth))
             }
         }
+    }
+
+    /// Draggable divider for the brain column. Drag left to widen, right to
+    /// shrink; clamped so neither side can be crushed.
+    @State private var brainDragStartWidth: Double?
+
+    private var brainResizeHandle: some View {
+        ZStack {
+            Divider().opacity(0.5)
+            Rectangle().fill(Color.clear)
+        }
+        .frame(width: 9)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    let start = brainDragStartWidth ?? settings.editorBrainWidth
+                    if brainDragStartWidth == nil { brainDragStartWidth = start }
+                    let range = Settings.editorBrainWidthRange
+                    let proposed = start - Double(value.translation.width)
+                    settings.editorBrainWidth = min(max(proposed, range.lowerBound), range.upperBound)
+                }
+                .onEnded { _ in brainDragStartWidth = nil }
+        )
+        .help("Drag to resize the brain panel")
     }
 
     /// A heard command about to fire. Covers the whole transcript region so it's
