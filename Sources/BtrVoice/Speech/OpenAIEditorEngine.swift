@@ -14,6 +14,13 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     var onFinished: (() -> Void)?
     var onError: ((Error) -> Void)?
     var onStatus: ((String) -> Void)?
+    /// The editor recognised an app action by meaning ("copy the highlighted
+    /// text") and wants it staged. Delivered on the main thread; the controller
+    /// runs it through the confirmation overlay like any spoken command.
+    var onCommand: ((BufferAction) -> Void)?
+    /// The editor's rewrite streaming in — the full transcript so far, shown in
+    /// place of the buffer while it arrives. Nil clears the preview.
+    var onReplacementPreview: ((String?) -> Void)?
 
     var displayName: String { "GPT Editor" }
     var isOnDevice: Bool { false }
@@ -38,7 +45,11 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     private var cancelled = false
     private var preRoll: [Data] = []
     private var pendingReply = ""
+    /// Raw speech-to-text of what the user is saying right now, for feedback
+    /// while they talk (the polished rewrite only starts once they pause).
+    private var rawPartial = ""
     private var errorReported = false
+    private var transcriptionRetried = false
 
     enum EngineError: LocalizedError {
         case noKey
@@ -137,123 +148,215 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
 
         switch type {
         case "session.created":
-            send(["type": "session.update", "session": [
-                "type": "realtime",
-                "output_modalities": ["text"],
-                "instructions": Self.editorInstructions(),
-                "tools": [[
-                    "type": "function",
-                    "name": "remember_rule",
-                    "description": "Save a standing rule the user taught you (a spoken alias, a formatting preference, a 'from now on when I say X do Y' pattern). The rule persists across sessions and is shown to you at the start of every future one.",
-                    "parameters": [
-                        "type": "object",
-                        "properties": [
-                            "rule": [
-                                "type": "string",
-                                "description": "The rule, stated concisely and self-contained, e.g. 'when the user says github dot com, write tch1001.github.io'",
-                            ],
-                        ],
-                        "required": ["rule"],
-                    ],
-                ]],
-                "tool_choice": "auto",
-                "audio": ["input": [
-                    "format": ["type": "audio/pcm", "rate": 24_000],
-                    "turn_detection": ["type": "server_vad"],
-                ]],
-            ]])
+            sendSessionConfig(withInputTranscription: true)
 
         case "session.updated":
-            if !seedTranscript.isEmpty {
-                send(["type": "conversation.item.create", "item": [
-                    "type": "message", "role": "system",
-                    "content": [["type": "input_text", "text": "The transcript currently reads: \(seedTranscript)"]],
-                ]])
-            }
+            handleSessionReady()
+
+        case "conversation.item.input_audio_transcription.delta":
+            // Live feedback while the user is still speaking: raw recognition
+            // of their words, shown as the grey in-flight tail.
             lock.lock()
-            ready = true
-            let backlog = preRoll
-            preRoll.removeAll()
+            rawPartial += (event["delta"] as? String) ?? ""
+            let partial = rawPartial
             lock.unlock()
-            Log.write("gpt-editor: session ready")
-            emit { self.onStatus?("Editor listening") }
-            for chunk in backlog {
-                send(["type": "input_audio_buffer.append", "audio": chunk.base64EncodedString()])
-            }
+            emit { self.onPartial?(partial) }
+
+        case "conversation.item.input_audio_transcription.completed":
+            lock.lock()
+            rawPartial = ((event["transcript"] as? String) ?? rawPartial)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let partial = rawPartial
+            lock.unlock()
+            emit { self.onPartial?(partial) }
 
         case "response.output_text.delta", "response.text.delta":
             lock.lock()
             pendingReply += (event["delta"] as? String) ?? ""
+            let preview = pendingReply
             lock.unlock()
+            // Stream the rewrite as it's generated instead of popping at the end.
+            emit { self.onReplacementPreview?(preview) }
 
         case "response.done":
-            lock.lock()
-            var transcript = pendingReply
-            pendingReply = ""
-            let stillFinishing = finishing
-            lock.unlock()
-
-            // The editor may have called remember_rule instead of (or besides)
-            // producing transcript text.
-            var calledTool = false
-            if let response = event["response"] as? [String: Any],
-               let output = response["output"] as? [[String: Any]] {
-                for item in output {
-                    switch item["type"] as? String {
-                    case "function_call":
-                        calledTool = true
-                        handleFunctionCall(item)
-                    default:
-                        if transcript.isEmpty {
-                            for content in (item["content"] as? [[String: Any]]) ?? [] {
-                                transcript += (content["text"] as? String) ?? ""
-                            }
-                        }
-                    }
-                }
-            }
-            let cleaned = JarvisEngine.sanitize(transcript)
-            if !cleaned.isEmpty {
-                emit { self.onSegmentFinal?(cleaned) }
-            }
-            if calledTool {
-                // Let the model continue (it usually re-emits the transcript next).
-                send(["type": "response.create"])
-            } else if stillFinishing {
-                completeFinish()
-            }
+            handleResponseDone(event)
 
         case "error":
-            let message = (event["error"] as? [String: Any])?["message"] as? String ?? text
-            lock.lock(); let benign = finishing || cancelled; lock.unlock()
-            if benign {
-                Log.write("gpt-editor: (finishing) \(message)")
-                if finishing { completeFinish() }
-            } else {
-                reportError(EngineError.api(message))
-            }
+            handleErrorEvent(event, raw: text)
 
         default:
             break
         }
     }
 
-    /// The editor asked to save a rule to its persistent memory.
+    private func sendSessionConfig(withInputTranscription: Bool) {
+        var input: [String: Any] = [
+            "format": ["type": "audio/pcm", "rate": 24_000],
+            "turn_detection": ["type": "server_vad"],
+        ]
+        if withInputTranscription {
+            input["transcription"] = ["model": "gpt-realtime-whisper"]
+        }
+        send(["type": "session.update", "session": [
+            "type": "realtime",
+            "output_modalities": ["text"],
+            "instructions": Self.editorInstructions(),
+            "audio": ["input": input],
+            "tool_choice": "auto",
+            "tools": [
+                    [
+                        "type": "function",
+                        "name": "remember_rule",
+                        "description": "Save a standing rule the user taught you (a spoken alias, a formatting preference, a 'from now on when I say X do Y' pattern). The rule persists across sessions and is shown to you at the start of every future one.",
+                        "parameters": [
+                            "type": "object",
+                            "properties": [
+                                "rule": [
+                                    "type": "string",
+                                    "description": "The rule, stated concisely and self-contained, e.g. 'when the user says github dot com, write tch1001.github.io'",
+                                ],
+                            ],
+                            "required": ["rule"],
+                        ],
+                    ],
+                    [
+                        "type": "function",
+                        "name": "app_command",
+                        "description": "Perform an action in the dictation app. Call this whenever the user asks for one of these actions in ANY phrasing — 'do copy', 'copy the text', 'copy the highlighted text' all mean copy. The app shows the user a confirmation before executing, so calling this is safe.",
+                        "parameters": [
+                            "type": "object",
+                            "properties": [
+                                "action": [
+                                    "type": "string",
+                                    "enum": ["paste", "copy", "select_all", "click", "insert", "send"],
+                                    "description": "paste = press Cmd-V in the target app; copy = press Cmd-C (copies whatever is selected there); select_all = press Cmd-A; click = left-click at the current mouse pointer; insert = type the current transcript into the target app; send = type the transcript, then press Return to send it.",
+                                ],
+                            ],
+                            "required": ["action"],
+                        ],
+                    ],
+                ],
+        ]])
+    }
+
+    private func handleSessionReady() {
+        if !seedTranscript.isEmpty {
+            send(["type": "conversation.item.create", "item": [
+                "type": "message", "role": "system",
+                "content": [["type": "input_text", "text": "The transcript currently reads: \(seedTranscript)"]],
+            ]])
+        }
+        lock.lock()
+        ready = true
+        let backlog = preRoll
+        preRoll.removeAll()
+        lock.unlock()
+        Log.write("gpt-editor: session ready")
+        emit { self.onStatus?("Editor listening") }
+        for chunk in backlog {
+            send(["type": "input_audio_buffer.append", "audio": chunk.base64EncodedString()])
+        }
+    }
+
+    private func handleResponseDone(_ event: [String: Any]) {
+        lock.lock()
+        var transcript = pendingReply
+        pendingReply = ""
+        rawPartial = ""
+        let stillFinishing = finishing
+        lock.unlock()
+
+        // The editor may have called a tool instead of (or besides) producing
+        // transcript text.
+        var calledTool = false
+        if let response = event["response"] as? [String: Any],
+           let output = response["output"] as? [[String: Any]] {
+            for item in output {
+                switch item["type"] as? String {
+                case "function_call":
+                    calledTool = true
+                    handleFunctionCall(item)
+                default:
+                    if transcript.isEmpty {
+                        for content in (item["content"] as? [[String: Any]]) ?? [] {
+                            transcript += (content["text"] as? String) ?? ""
+                        }
+                    }
+                }
+            }
+        }
+        let cleaned = JarvisEngine.sanitize(transcript)
+        emit {
+            self.onReplacementPreview?(nil)
+            if !cleaned.isEmpty { self.onSegmentFinal?(cleaned) }
+        }
+        if calledTool {
+            // Let the model continue (it usually re-emits the transcript next).
+            send(["type": "response.create"])
+        } else if stillFinishing {
+            completeFinish()
+        }
+    }
+
+    private func handleErrorEvent(_ event: [String: Any], raw text: String) {
+        let message = (event["error"] as? [String: Any])?["message"] as? String ?? text
+        // If the input-transcription config is what the API rejected, retry
+        // without it — live speech feedback is a nicety, not the feature.
+        if message.localizedCaseInsensitiveContains("transcription"), !transcriptionRetried {
+            transcriptionRetried = true
+            Log.write("gpt-editor: transcription config rejected, retrying without — \(message)")
+            sendSessionConfig(withInputTranscription: false)
+            return
+        }
+        lock.lock(); let benign = finishing || cancelled; lock.unlock()
+        if benign {
+            Log.write("gpt-editor: (finishing) \(message)")
+            if finishing { completeFinish() }
+        } else {
+            reportError(EngineError.api(message))
+        }
+    }
+
+    /// The editor called one of its tools: saving a rule, or staging an app action.
     private func handleFunctionCall(_ item: [String: Any]) {
         guard let name = item["name"] as? String,
               let callID = item["call_id"] as? String else { return }
-        var output = #"{"status":"error","detail":"unknown tool"}"#
-        if name == "remember_rule",
-           let argsText = item["arguments"] as? String,
-           let argsData = argsText.data(using: .utf8),
-           let args = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
-           let rule = args["rule"] as? String,
-           !rule.trimmingCharacters(in: .whitespaces).isEmpty {
-            JarvisNotes.shared.add(rule)
-            output = #"{"status":"saved"}"#
-            Log.write("gpt-editor: learned rule — \(rule)")
-            emit { self.onStatus?("Editor learned a rule (see Jarvis menu)") }
+        let args: [String: Any] = {
+            guard let text = item["arguments"] as? String,
+                  let data = text.data(using: .utf8),
+                  let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return [:] }
+            return parsed
+        }()
+
+        var output = #"{"status":"error","detail":"unknown tool or bad arguments"}"#
+        switch name {
+        case "remember_rule":
+            if let rule = args["rule"] as? String,
+               !rule.trimmingCharacters(in: .whitespaces).isEmpty {
+                JarvisNotes.shared.add(rule)
+                output = #"{"status":"saved"}"#
+                Log.write("gpt-editor: learned rule — \(rule)")
+                emit { self.onStatus?("Editor learned a rule (see Jarvis menu)") }
+            }
+        case "app_command":
+            let mapping: [String: BufferAction] = [
+                "paste": .pasteInTarget,
+                "copy": .copyInTarget,
+                "select_all": .selectAllInTarget,
+                "click": .clickAtPointer,
+                "insert": .commit,
+                "send": .commitAndSend,
+            ]
+            if let actionName = args["action"] as? String, let action = mapping[actionName] {
+                output = #"{"status":"queued","note":"the user is being asked to confirm"}"#
+                Log.write("gpt-editor: app command — \(actionName)")
+                emit { self.onCommand?(action) }
+            }
+        default:
+            break
         }
+
         send(["type": "conversation.item.create", "item": [
             "type": "function_call_output",
             "call_id": callID,

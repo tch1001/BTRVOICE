@@ -406,6 +406,16 @@ final class DictationController: ObservableObject {
         engine.onPartial = { [weak self] text in
             self?.buffer.setPartial(text)
         }
+        if let editor = engine as? OpenAIEditorEngine {
+            // Semantic app commands ("copy the highlighted text") and the
+            // streaming rewrite preview, both delivered on the main thread.
+            editor.onCommand = { [weak self] action in
+                self?.stagePendingCommand(action)
+            }
+            editor.onReplacementPreview = { [weak self] preview in
+                self?.buffer.setReplacementPreview(preview)
+            }
+        }
         engine.onSegmentFinal = { [weak self, weak engine] text in
             guard let self else { return }
 

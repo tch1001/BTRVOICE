@@ -10,6 +10,9 @@ final class TextBuffer: ObservableObject {
     @Published private(set) var text: String = ""
     /// Live in-flight recognition for the current segment, shown greyed out.
     @Published private(set) var partial: String = ""
+    /// Editor-mode streaming: the incoming full-transcript rewrite, shown in
+    /// place of everything while it streams. Nil outside editor responses.
+    @Published private(set) var replacementPreview: String?
     /// Bumped whenever `text` changes from *our* side, so the editor knows to reload
     /// without fighting the user's cursor on every keystroke.
     @Published private(set) var revision: Int = 0
@@ -33,6 +36,11 @@ final class TextBuffer: ObservableObject {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != partial else { return }
         partial = trimmed
+    }
+
+    func setReplacementPreview(_ value: String?) {
+        guard value != replacementPreview else { return }
+        replacementPreview = value
     }
 
     /// Applies a finalised segment. Returns any actions the buffer can't perform
@@ -109,14 +117,16 @@ final class TextBuffer: ObservableObject {
         pushUndo()
         text = value
         partial = ""
+        replacementPreview = nil
         revision += 1
     }
 
     func clear() {
-        guard !isEmpty else { return }
+        guard !isEmpty || replacementPreview != nil else { return }
         pushUndo()
         text = ""
         partial = ""
+        replacementPreview = nil
         revision += 1
     }
 

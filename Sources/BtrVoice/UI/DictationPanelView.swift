@@ -121,9 +121,11 @@ struct DictationPanelView: View {
     // itself mid-sentence.
     private var transcript: some View {
         ZStack {
+            // While the editor streams a full-transcript rewrite, show it as the
+            // in-flight (grey) text in place of everything else.
             BufferTextView(
-                text: buffer.text,
-                partial: buffer.partial,
+                text: buffer.replacementPreview == nil ? buffer.text : "",
+                partial: buffer.replacementPreview ?? buffer.partial,
                 revision: buffer.revision,
                 placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
                 onEdit: { buffer.userDidEdit($0) },
