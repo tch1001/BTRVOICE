@@ -162,6 +162,9 @@ struct DictationPanelView: View {
 
     private var brainResizeHandle: some View {
         ZStack {
+            // The panel moves on background drags; the resize strip must not
+            // double as a window-move handle.
+            WindowDragBlocker()
             Divider().opacity(0.5)
             Rectangle().fill(Color.clear)
         }
@@ -334,6 +337,17 @@ struct DictationPanelView: View {
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+    }
+}
+
+/// An AppKit view that refuses window-background dragging, for regions where a
+/// drag means something else (like resizing the brain column).
+private struct WindowDragBlocker: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Blocker() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class Blocker: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
     }
 }
 
