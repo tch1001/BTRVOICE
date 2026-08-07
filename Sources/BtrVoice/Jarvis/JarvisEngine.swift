@@ -21,7 +21,15 @@ enum JarvisEngine {
         }
     }
 
+    /// Whether the currently selected backend can serve requests.
     static var isAvailable: Bool {
+        switch Settings.shared.jarvisBackend {
+        case .onDevice: return onDeviceAvailable
+        case .openAI: return OpenAIKeyStore.isSet
+        }
+    }
+
+    static var onDeviceAvailable: Bool {
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             return SystemLanguageModel.default.availability == .available
@@ -103,7 +111,7 @@ enum JarvisEngine {
     /// notes, no sanitising. Powers the `--ask` flag and the test chat window.
     static func ask(_ prompt: String) async throws -> String {
         #if canImport(FoundationModels)
-        guard #available(macOS 26.0, *), isAvailable else { throw JarvisError.unavailable }
+        guard #available(macOS 26.0, *), onDeviceAvailable else { throw JarvisError.unavailable }
         let session = LanguageModelSession()
         let result = try await session.respond(to: prompt).content
         guard !result.isEmpty else { throw JarvisError.emptyResult }
@@ -114,9 +122,31 @@ enum JarvisEngine {
     }
 
     private static func respond(prompt: String) async throws -> String {
-        #if canImport(FoundationModels)
-        guard #available(macOS 26.0, *), isAvailable else { throw JarvisError.unavailable }
+        let instructions = systemInstructions()
 
+        // Cloud backend: gpt-realtime-2.1 over the Realtime API.
+        if Settings.shared.jarvisBackend == .openAI {
+            let result = sanitize(try await OpenAIRealtimeText.respond(
+                instructions: instructions, prompt: prompt
+            ))
+            guard !result.isEmpty else { throw JarvisError.emptyResult }
+            return result
+        }
+
+        #if canImport(FoundationModels)
+        guard #available(macOS 26.0, *), onDeviceAvailable else { throw JarvisError.unavailable }
+
+        let session = LanguageModelSession(instructions: instructions)
+        let response = try await session.respond(to: prompt)
+        let result = sanitize(response.content)
+        guard !result.isEmpty else { throw JarvisError.emptyResult }
+        return result
+        #else
+        throw JarvisError.unavailable
+        #endif
+    }
+
+    private static func systemInstructions() -> String {
         let notes = JarvisNotes.shared.promptBlock
         let instructions = """
             You are Jarvis, an assistant embedded in BtrVoice, a macOS dictation app. \
@@ -134,15 +164,7 @@ enum JarvisEngine {
             If nothing needs changing, return it unchanged.
             \(notes.isEmpty ? "" : "\nSaved rules from the user:\n\(notes)")
             """
-
-        let session = LanguageModelSession(instructions: instructions)
-        let response = try await session.respond(to: prompt)
-        let result = sanitize(response.content)
-        guard !result.isEmpty else { throw JarvisError.emptyResult }
-        return result
-        #else
-        throw JarvisError.unavailable
-        #endif
+        return instructions
     }
 
     /// The model occasionally echoes the <text> wrapper or splits its answer

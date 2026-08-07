@@ -219,7 +219,9 @@ final class DictationController: ObservableObject {
     /// local buffer only, and edits are undoable — so no confirmation countdown.
     private func handleJarvis(_ instruction: String) {
         guard JarvisEngine.isAvailable else {
-            status = "Jarvis needs Apple Intelligence on this Mac"
+            status = settings.jarvisBackend == .openAI
+                ? "Jarvis (OpenAI) needs an API key — see the Jarvis menu"
+                : "Jarvis needs Apple Intelligence on this Mac"
             Log.write("jarvis: unavailable — instruction dropped: \(instruction)")
             return
         }
@@ -354,6 +356,13 @@ final class DictationController: ObservableObject {
 
     /// Which engine a session started right now would use.
     static func resolveEngine(from choice: SpeechEngineChoice) -> SpeechEngineChoice {
+        switch choice {
+        case .gptWhisper, .gptLiveTranscribe:
+            // Cloud engines need a key; fall back to the local stack without one.
+            if OpenAIKeyStore.isSet { return choice }
+        case .automatic, .speechAnalyzer, .legacy:
+            break
+        }
         if #available(macOS 26.0, *), choice != .legacy, SpeechAnalyzerEngine.runtimeSupported {
             return .speechAnalyzer
         }
@@ -362,15 +371,23 @@ final class DictationController: ObservableObject {
 
     private func makeEngine() -> TranscriptionEngine {
         let locale = Locale(identifier: settings.localeIdentifier)
-        if #available(macOS 26.0, *),
-           Self.resolveEngine(from: settings.engineChoice) == .speechAnalyzer {
-            return SpeechAnalyzerEngine(locale: locale)
+        switch Self.resolveEngine(from: settings.engineChoice) {
+        case .gptWhisper:
+            return OpenAITranscribeEngine(model: "gpt-realtime-whisper", displayName: "GPT Realtime Whisper")
+        case .gptLiveTranscribe:
+            return OpenAITranscribeEngine(model: "gpt-live-transcribe", displayName: "GPT Live Transcribe")
+        case .speechAnalyzer:
+            if #available(macOS 26.0, *) {
+                return SpeechAnalyzerEngine(locale: locale)
+            }
+            fallthrough
+        default:
+            return AppleSpeechEngine(
+                locale: locale,
+                onDeviceOnly: settings.onDeviceOnly,
+                addsPunctuation: settings.autoPunctuation
+            )
         }
-        return AppleSpeechEngine(
-            locale: locale,
-            onDeviceOnly: settings.onDeviceOnly,
-            addsPunctuation: settings.autoPunctuation
-        )
     }
 
     private func beginSession() {

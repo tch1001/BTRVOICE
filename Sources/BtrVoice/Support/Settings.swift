@@ -22,12 +22,31 @@ enum SpeechEngineChoice: String, CaseIterable {
     case automatic
     case speechAnalyzer
     case legacy
+    /// OpenAI cloud transcription over the Realtime API. Needs an API key.
+    case gptWhisper
+    case gptLiveTranscribe
 
     var label: String {
         switch self {
         case .automatic: return "Automatic (newest available)"
         case .speechAnalyzer: return "SpeechAnalyzer (macOS 26+)"
         case .legacy: return "SFSpeechRecognizer (legacy)"
+        case .gptWhisper: return "OpenAI Realtime Whisper (cloud)"
+        case .gptLiveTranscribe: return "OpenAI Live Transcribe (cloud)"
+        }
+    }
+}
+
+enum JarvisBackend: String, CaseIterable {
+    /// Apple's on-device model. Free, private, offline — but small.
+    case onDevice
+    /// gpt-realtime-2.1 over the OpenAI API. Needs an API key and credits.
+    case openAI
+
+    var label: String {
+        switch self {
+        case .onDevice: return "On-Device (Apple Intelligence)"
+        case .openAI: return "OpenAI (gpt-realtime-2.1)"
         }
     }
 }
@@ -71,6 +90,7 @@ final class Settings: ObservableObject {
     /// When on, Jarvis cleans up every utterance automatically; when off, only
     /// on an explicit "Jarvis, …" command.
     @Published var jarvisAutoCleanup: Bool { didSet { store.set(jarvisAutoCleanup, forKey: Key.jarvisAutoCleanup) } }
+    @Published var jarvisBackend: JarvisBackend { didSet { store.set(jarvisBackend.rawValue, forKey: Key.jarvisBackend) } }
 
     private enum Key {
         static let onDeviceOnly = "onDeviceOnly"
@@ -86,6 +106,7 @@ final class Settings: ObservableObject {
         static let locale = "localeIdentifier"
         static let engineChoice = "engineChoice"
         static let jarvisAutoCleanup = "jarvisAutoCleanup"
+        static let jarvisBackend = "jarvisBackend"
     }
 
     private init() {
@@ -108,6 +129,7 @@ final class Settings: ObservableObject {
             Key.locale: Locale.current.identifier,
             Key.engineChoice: SpeechEngineChoice.automatic.rawValue,
             Key.jarvisAutoCleanup: false,
+            Key.jarvisBackend: JarvisBackend.onDevice.rawValue,
         ])
 
         onDeviceOnly = store.bool(forKey: Key.onDeviceOnly)
@@ -123,6 +145,7 @@ final class Settings: ObservableObject {
         localeIdentifier = store.string(forKey: Key.locale) ?? Locale.current.identifier
         engineChoice = SpeechEngineChoice(rawValue: store.string(forKey: Key.engineChoice) ?? "") ?? .automatic
         jarvisAutoCleanup = store.bool(forKey: Key.jarvisAutoCleanup)
+        jarvisBackend = JarvisBackend(rawValue: store.string(forKey: Key.jarvisBackend) ?? "") ?? .onDevice
     }
 
     /// Whether the modern engine can actually run here, so pickers can grey it out.

@@ -126,11 +126,45 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         if JarvisEngine.isAvailable {
             submenu.addItem(toggle("Clean up dictation automatically", #selector(toggleJarvisAuto), settings.jarvisAutoCleanup))
-            submenu.addItem(item("Chat with On-Device AI…", action: #selector(showJarvisChat)))
         } else {
-            let unavailable = NSMenuItem(title: "Unavailable — needs Apple Intelligence", action: nil, keyEquivalent: "")
+            let unavailable = NSMenuItem(
+                title: settings.jarvisBackend == .openAI
+                    ? "Unavailable — set an OpenAI API key below"
+                    : "Unavailable — needs Apple Intelligence",
+                action: nil, keyEquivalent: ""
+            )
             unavailable.isEnabled = false
             submenu.addItem(unavailable)
+        }
+
+        let backend = NSMenuItem(title: "AI Backend", action: nil, keyEquivalent: "")
+        let backendMenu = NSMenu()
+        for choice in JarvisBackend.allCases {
+            let entry = NSMenuItem(title: choice.label, action: #selector(selectJarvisBackend(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = choice.rawValue
+            entry.state = settings.jarvisBackend == choice ? .on : .off
+            if choice == .onDevice, !JarvisEngine.onDeviceAvailable {
+                entry.action = nil
+                entry.toolTip = "Needs Apple Intelligence on macOS 26+"
+            }
+            if choice == .openAI, !OpenAIKeyStore.isSet {
+                entry.toolTip = "Set an OpenAI API key first"
+            }
+            backendMenu.addItem(entry)
+        }
+        backend.submenu = backendMenu
+        submenu.addItem(backend)
+
+        submenu.addItem(item(
+            OpenAIKeyStore.isSet ? "OpenAI API Key (set) — Change…" : "Set OpenAI API Key…",
+            action: #selector(setOpenAIKey)
+        ))
+        if OpenAIKeyStore.isSet {
+            submenu.addItem(item("Remove OpenAI API Key", action: #selector(clearOpenAIKey)))
+        }
+        if JarvisEngine.onDeviceAvailable {
+            submenu.addItem(item("Chat with On-Device AI…", action: #selector(showJarvisChat)))
         }
 
         submenu.addItem(.separator())
@@ -187,11 +221,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 entry.action = nil
                 entry.toolTip = "Requires macOS 26 or later"
             }
+            if choice == .gptWhisper || choice == .gptLiveTranscribe, !OpenAIKeyStore.isSet {
+                entry.action = nil
+                entry.toolTip = "Needs an OpenAI API key (Jarvis menu → Set OpenAI API Key)"
+            }
             engineMenu.addItem(entry)
         }
         let active = DictationController.resolveEngine(from: settings.engineChoice)
         let note = NSMenuItem(
-            title: "Active: \(active == .speechAnalyzer ? "SpeechAnalyzer" : "SFSpeechRecognizer")",
+            title: "Active: \(active.label)",
             action: nil,
             keyEquivalent: ""
         )
@@ -266,6 +304,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleClearAfterCommit() { settings.clearAfterCommit.toggle() }
     @objc private func toggleHideAfterCommit() { settings.hideAfterCommit.toggle() }
     @objc private func toggleJarvisAuto() { settings.jarvisAutoCleanup.toggle() }
+    @objc private func selectJarvisBackend(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let choice = JarvisBackend(rawValue: raw) else { return }
+        settings.jarvisBackend = choice
+        Log.write("jarvis backend → \(choice.label)")
+    }
+
+    @objc private func setOpenAIKey() {
+        let alert = NSAlert()
+        alert.messageText = "OpenAI API Key"
+        alert.informativeText = "Stored locally in Application Support (owner-only permissions). Used for the OpenAI Jarvis backend and cloud transcription engines."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.placeholderString = "sk-…"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty { OpenAIKeyStore.write(key) }
+        }
+    }
+
+    @objc private func clearOpenAIKey() {
+        OpenAIKeyStore.clear()
+        if settings.jarvisBackend == .openAI { settings.jarvisBackend = .onDevice }
+    }
+
     @objc private func showJarvisChat() {
         // Menu actions arrive on the main thread; hop explicitly for the actor.
         Task { @MainActor in JarvisChatWindowController.shared.show() }

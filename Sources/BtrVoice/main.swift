@@ -12,7 +12,7 @@ if let askIndex = CommandLine.arguments.firstIndex(of: "--ask") {
         print("usage: BtrVoice --ask \"your prompt\"")
         exit(2)
     }
-    guard JarvisEngine.isAvailable else {
+    guard JarvisEngine.onDeviceAvailable else {
         print("On-device model unavailable (needs Apple Intelligence on macOS 26+).")
         exit(1)
     }
