@@ -95,6 +95,8 @@ final class Settings: ObservableObject {
     /// on an explicit "Jarvis, …" command.
     @Published var jarvisAutoCleanup: Bool { didSet { store.set(jarvisAutoCleanup, forKey: Key.jarvisAutoCleanup) } }
     @Published var jarvisBackend: JarvisBackend { didSet { store.set(jarvisBackend.rawValue, forKey: Key.jarvisBackend) } }
+    /// The "brain" column in the panel while the GPT Editor engine is active.
+    @Published var showEditorBrain: Bool { didSet { store.set(showEditorBrain, forKey: Key.showEditorBrain) } }
 
     private enum Key {
         static let onDeviceOnly = "onDeviceOnly"
@@ -111,6 +113,7 @@ final class Settings: ObservableObject {
         static let engineChoice = "engineChoice"
         static let jarvisAutoCleanup = "jarvisAutoCleanup"
         static let jarvisBackend = "jarvisBackend"
+        static let showEditorBrain = "showEditorBrain"
     }
 
     private init() {
@@ -134,6 +137,7 @@ final class Settings: ObservableObject {
             Key.engineChoice: SpeechEngineChoice.automatic.rawValue,
             Key.jarvisAutoCleanup: false,
             Key.jarvisBackend: JarvisBackend.onDevice.rawValue,
+            Key.showEditorBrain: true,
         ])
 
         onDeviceOnly = store.bool(forKey: Key.onDeviceOnly)
@@ -150,6 +154,7 @@ final class Settings: ObservableObject {
         engineChoice = SpeechEngineChoice(rawValue: store.string(forKey: Key.engineChoice) ?? "") ?? .automatic
         jarvisAutoCleanup = store.bool(forKey: Key.jarvisAutoCleanup)
         jarvisBackend = JarvisBackend(rawValue: store.string(forKey: Key.jarvisBackend) ?? "") ?? .onDevice
+        showEditorBrain = store.bool(forKey: Key.showEditorBrain)
     }
 
     /// Whether the modern engine can actually run here, so pickers can grey it out.

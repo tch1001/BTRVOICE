@@ -18,6 +18,11 @@ struct DictationPanelView: View {
 
     private var isListening: Bool { controller.isListening }
 
+    /// The "brain" column only makes sense while the GPT Editor engine is active.
+    private var editorEngineActive: Bool {
+        DictationController.resolveEngine(from: settings.engineChoice) == .gptEditor
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -120,26 +125,35 @@ struct DictationPanelView: View {
     // size the user resizes the window to, scrolling on overflow, and never resizes
     // itself mid-sentence.
     private var transcript: some View {
-        ZStack {
-            // While the editor streams a full-transcript rewrite, show it as the
-            // in-flight (grey) text in place of everything else.
-            BufferTextView(
-                text: buffer.replacementPreview == nil ? buffer.text : "",
-                partial: buffer.replacementPreview ?? buffer.partial,
-                revision: buffer.revision,
-                placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
-                onEdit: { buffer.userDidEdit($0) },
-                onAdoptAll: { controller.adoptEditedText($0) },
-                onCommit: { controller.commit(send: false) },
-                onCancel: { controller.cancel() }
-            )
-            if let pending = controller.pendingCommand {
-                pendingCommandOverlay(pending)
+        HStack(spacing: 0) {
+            ZStack {
+                // While the editor streams a full-transcript rewrite, show it as the
+                // in-flight (grey) text in place of everything else.
+                BufferTextView(
+                    text: buffer.replacementPreview == nil ? buffer.text : "",
+                    partial: buffer.replacementPreview ?? buffer.partial,
+                    revision: buffer.revision,
+                    placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
+                    onEdit: { buffer.userDidEdit($0) },
+                    onAdoptAll: { controller.adoptEditedText($0) },
+                    onCommit: { controller.commit(send: false) },
+                    onCancel: { controller.cancel() }
+                )
+                if let pending = controller.pendingCommand {
+                    pendingCommandOverlay(pending)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+
+            // The editor's brain, inline: what it hears, writes, and does.
+            if editorEngineActive, settings.showEditorBrain {
+                Divider().opacity(0.5)
+                EditorActivityView(log: .shared)
+                    .frame(width: 250)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
     }
 
     /// A heard command about to fire. Covers the whole transcript region so it's
@@ -270,6 +284,15 @@ struct DictationPanelView: View {
             .help("Clear the buffer")
 
             Spacer(minLength: 0)
+
+            if editorEngineActive {
+                Button {
+                    settings.showEditorBrain.toggle()
+                } label: {
+                    Image(systemName: settings.showEditorBrain ? "brain.head.profile.fill" : "brain.head.profile")
+                }
+                .help(settings.showEditorBrain ? "Hide the editor's brain" : "Show the editor's brain — what it hears, writes, and does")
+            }
 
             Picker("", selection: $settings.newlineMode) {
                 ForEach(NewlineMode.allCases, id: \.self) { mode in

@@ -168,7 +168,14 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let partial = rawPartial
             lock.unlock()
+            if !partial.isEmpty { EditorActivityLog.post(.heard, "“\(partial)”") }
             emit { self.onPartial?(partial) }
+
+        case "input_audio_buffer.speech_started":
+            EditorActivityLog.post(.info, "Speech detected — listening to the turn")
+
+        case "input_audio_buffer.speech_stopped":
+            EditorActivityLog.post(.info, "Turn ended — editor is deciding what the transcript should say")
 
         case "response.output_text.delta", "response.text.delta":
             lock.lock()
@@ -252,6 +259,8 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         preRoll.removeAll()
         lock.unlock()
         Log.write("gpt-editor: session ready")
+        EditorActivityLog.post(.info, "Session ready — editor is listening"
+            + (seedTranscript.isEmpty ? "" : " (seeded with the staged transcript)"))
         emit { self.onStatus?("Editor listening") }
         for chunk in backlog {
             send(["type": "input_audio_buffer.append", "audio": chunk.base64EncodedString()])
@@ -286,6 +295,11 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             }
         }
         let cleaned = JarvisEngine.sanitize(transcript)
+        if !cleaned.isEmpty {
+            EditorActivityLog.post(.rewrote, cleaned)
+        } else if !calledTool {
+            EditorActivityLog.post(.info, "Editor responded with no transcript change")
+        }
         emit {
             self.onReplacementPreview?(nil)
             if !cleaned.isEmpty { self.onSegmentFinal?(cleaned) }
@@ -337,6 +351,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 JarvisNotes.shared.add(rule)
                 output = #"{"status":"saved"}"#
                 Log.write("gpt-editor: learned rule — \(rule)")
+                EditorActivityLog.post(.tool, "Learned a rule: \(rule)")
                 emit { self.onStatus?("Editor learned a rule (see Jarvis menu)") }
             }
         case "app_command":
@@ -351,6 +366,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             if let actionName = args["action"] as? String, let action = mapping[actionName] {
                 output = #"{"status":"queued","note":"the user is being asked to confirm"}"#
                 Log.write("gpt-editor: app command — \(actionName)")
+                EditorActivityLog.post(.tool, "Requested app action: \(actionName) (awaiting your confirmation)")
                 emit { self.onCommand?(action) }
             }
         default:
@@ -429,6 +445,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.unlock()
         guard !already else { return }
         Log.write("gpt-editor: ERROR — \(error.localizedDescription)")
+        EditorActivityLog.post(.error, error.localizedDescription)
         emit { self.onError?(error) }
     }
 

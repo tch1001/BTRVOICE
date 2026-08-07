@@ -337,6 +337,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         Task { @MainActor in JarvisChatWindowController.shared.show() }
     }
 
+
     @objc private func deleteJarvisNote(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let id = UUID(uuidString: raw) else { return }
         JarvisNotes.shared.delete(id: id)
