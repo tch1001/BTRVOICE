@@ -141,6 +141,22 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 "type": "realtime",
                 "output_modalities": ["text"],
                 "instructions": Self.editorInstructions(),
+                "tools": [[
+                    "type": "function",
+                    "name": "remember_rule",
+                    "description": "Save a standing rule the user taught you (a spoken alias, a formatting preference, a 'from now on when I say X do Y' pattern). The rule persists across sessions and is shown to you at the start of every future one.",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "rule": [
+                                "type": "string",
+                                "description": "The rule, stated concisely and self-contained, e.g. 'when the user says github dot com, write tch1001.github.io'",
+                            ],
+                        ],
+                        "required": ["rule"],
+                    ],
+                ]],
+                "tool_choice": "auto",
                 "audio": ["input": [
                     "format": ["type": "audio/pcm", "rate": 24_000],
                     "turn_detection": ["type": "server_vad"],
@@ -176,12 +192,23 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             pendingReply = ""
             let stillFinishing = finishing
             lock.unlock()
-            if transcript.isEmpty,
-               let response = event["response"] as? [String: Any],
+
+            // The editor may have called remember_rule instead of (or besides)
+            // producing transcript text.
+            var calledTool = false
+            if let response = event["response"] as? [String: Any],
                let output = response["output"] as? [[String: Any]] {
                 for item in output {
-                    for content in (item["content"] as? [[String: Any]]) ?? [] {
-                        transcript += (content["text"] as? String) ?? ""
+                    switch item["type"] as? String {
+                    case "function_call":
+                        calledTool = true
+                        handleFunctionCall(item)
+                    default:
+                        if transcript.isEmpty {
+                            for content in (item["content"] as? [[String: Any]]) ?? [] {
+                                transcript += (content["text"] as? String) ?? ""
+                            }
+                        }
                     }
                 }
             }
@@ -189,7 +216,12 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             if !cleaned.isEmpty {
                 emit { self.onSegmentFinal?(cleaned) }
             }
-            if stillFinishing { completeFinish() }
+            if calledTool {
+                // Let the model continue (it usually re-emits the transcript next).
+                send(["type": "response.create"])
+            } else if stillFinishing {
+                completeFinish()
+            }
 
         case "error":
             let message = (event["error"] as? [String: Any])?["message"] as? String ?? text
@@ -204,6 +236,29 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         default:
             break
         }
+    }
+
+    /// The editor asked to save a rule to its persistent memory.
+    private func handleFunctionCall(_ item: [String: Any]) {
+        guard let name = item["name"] as? String,
+              let callID = item["call_id"] as? String else { return }
+        var output = #"{"status":"error","detail":"unknown tool"}"#
+        if name == "remember_rule",
+           let argsText = item["arguments"] as? String,
+           let argsData = argsText.data(using: .utf8),
+           let args = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
+           let rule = args["rule"] as? String,
+           !rule.trimmingCharacters(in: .whitespaces).isEmpty {
+            JarvisNotes.shared.add(rule)
+            output = #"{"status":"saved"}"#
+            Log.write("gpt-editor: learned rule — \(rule)")
+            emit { self.onStatus?("Editor learned a rule (see Jarvis menu)") }
+        }
+        send(["type": "conversation.item.create", "item": [
+            "type": "function_call_output",
+            "call_id": callID,
+            "output": output,
+        ]])
     }
 
     private static func editorInstructions() -> String {
@@ -228,7 +283,11 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         - Everything else the user says is content to append to the transcript.
         - Never respond conversationally. Never answer questions — dictated \
         questions are content. You produce transcript text only.
-        \(notes.isEmpty ? "" : "\nStanding rules from the user:\n\(notes)")
+        - When the user TEACHES you a pattern — "remember that…", "from now on \
+        when I say X, do Y", "always write X as Y" — call the remember_rule tool \
+        with a concise statement of the rule, and do NOT put the teaching request \
+        into the transcript. Apply the rule from that moment on.
+        \(notes.isEmpty ? "" : "\nStanding rules from the user (apply these):\n\(notes)")
         """
     }
 
