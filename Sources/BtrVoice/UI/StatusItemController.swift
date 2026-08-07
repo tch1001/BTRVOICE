@@ -221,7 +221,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 entry.action = nil
                 entry.toolTip = "Requires macOS 26 or later"
             }
-            if choice == .gptWhisper || choice == .gptLiveTranscribe, !OpenAIKeyStore.isSet {
+            if choice == .gptWhisper || choice == .gptLiveTranscribe || choice == .gptEditor, !OpenAIKeyStore.isSet {
                 entry.action = nil
                 entry.toolTip = "Needs an OpenAI API key (Jarvis menu → Set OpenAI API Key)"
             }

@@ -357,7 +357,7 @@ final class DictationController: ObservableObject {
     /// Which engine a session started right now would use.
     static func resolveEngine(from choice: SpeechEngineChoice) -> SpeechEngineChoice {
         switch choice {
-        case .gptWhisper, .gptLiveTranscribe:
+        case .gptWhisper, .gptLiveTranscribe, .gptEditor:
             // Cloud engines need a key; fall back to the local stack without one.
             if OpenAIKeyStore.isSet { return choice }
         case .automatic, .speechAnalyzer, .legacy:
@@ -376,6 +376,8 @@ final class DictationController: ObservableObject {
             return OpenAITranscribeEngine(model: "gpt-realtime-whisper", displayName: "GPT Realtime Whisper")
         case .gptLiveTranscribe:
             return OpenAITranscribeEngine(model: "gpt-live-transcribe", displayName: "GPT Live Transcribe")
+        case .gptEditor:
+            return OpenAIEditorEngine(seedTranscript: buffer.committedText)
         case .speechAnalyzer:
             if #available(macOS 26.0, *) {
                 return SpeechAnalyzerEngine(locale: locale)
@@ -400,8 +402,17 @@ final class DictationController: ObservableObject {
         engine.onPartial = { [weak self] text in
             self?.buffer.setPartial(text)
         }
-        engine.onSegmentFinal = { [weak self] text in
+        engine.onSegmentFinal = { [weak self, weak engine] text in
             guard let self else { return }
+
+            // Editor-style engines deliver the complete intended transcript:
+            // replace the buffer wholesale. Voice commands and Jarvis don't
+            // apply — the editor IS the intelligence layer.
+            if engine?.replacesBuffer == true {
+                DispatchQueue.main.async { self.buffer.replace(with: text) }
+                return
+            }
+
             let actions = VoiceCommands.parse(text, enabled: self.settings.voiceCommandsEnabled)
 
             if self.settings.jarvisAutoCleanup, JarvisEngine.isAvailable {

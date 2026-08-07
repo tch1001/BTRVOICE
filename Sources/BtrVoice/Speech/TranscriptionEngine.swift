@@ -25,6 +25,9 @@ protocol TranscriptionEngine: AnyObject {
     var isOnDevice: Bool { get }
     /// Seconds of audio in the current segment, for rotation policy.
     var segmentDuration: TimeInterval { get }
+    /// Editor-style engines return the complete intended transcript each time;
+    /// finals REPLACE the buffer instead of appending to it.
+    var replacesBuffer: Bool { get }
 
     func start() throws
     func append(_ buffer: AVAudioPCMBuffer)
@@ -38,4 +41,8 @@ protocol TranscriptionEngine: AnyObject {
     func finish()
     /// Tear down without flushing.
     func cancel()
+}
+
+extension TranscriptionEngine {
+    var replacesBuffer: Bool { false }
 }

@@ -25,6 +25,9 @@ enum SpeechEngineChoice: String, CaseIterable {
     /// OpenAI cloud transcription over the Realtime API. Needs an API key.
     case gptWhisper
     case gptLiveTranscribe
+    /// Not a transcriber — an editor: gpt-realtime-2.1 listens and maintains
+    /// the transcript the user intends, applying corrections in place.
+    case gptEditor
 
     var label: String {
         switch self {
@@ -33,6 +36,7 @@ enum SpeechEngineChoice: String, CaseIterable {
         case .legacy: return "SFSpeechRecognizer (legacy)"
         case .gptWhisper: return "OpenAI Realtime Whisper (cloud)"
         case .gptLiveTranscribe: return "OpenAI Live Transcribe (cloud)"
+        case .gptEditor: return "GPT Editor — understands & edits (cloud)"
         }
     }
 }
