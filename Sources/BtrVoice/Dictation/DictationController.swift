@@ -325,6 +325,25 @@ final class DictationController: ObservableObject {
             Permissions.openSettings(.accessibility)
             return
         }
+        // Keystrokes land in the frontmost app — which is US if the user just
+        // clicked the confirmation overlay. Give focus back to the tracked
+        // target first, exactly like the insert path does. (Clicks act at the
+        // pointer, so they skip the refocus.)
+        if case .clickAtPointer = action {
+            execute(action)
+            return
+        }
+        releaseFocus?()
+        targets.focusTarget { [weak self] focused in
+            guard let self else { return }
+            if !focused {
+                self.status = "Could not focus \(self.targets.targetName ?? "the target app") — pressing anyway"
+            }
+            self.execute(action)
+        }
+    }
+
+    private func execute(_ action: BufferAction) {
         let done: (Result<Void, TextInjector.InjectionError>) -> Void = { [weak self] result in
             if case .failure(let error) = result {
                 self?.fail(error.localizedDescription)

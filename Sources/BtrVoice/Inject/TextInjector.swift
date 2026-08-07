@@ -209,6 +209,9 @@ enum TextInjector {
                 DispatchQueue.main.async { completion(.failure(.eventSourceUnavailable)) }
                 return
             }
+            // The target app may have been activated only just now; give the
+            // window server a beat so the chord lands after the app is key.
+            usleep(80_000)
             let modifierKeys: [(CGEventFlags, CGKeyCode)] = [
                 (.maskControl, 59), (.maskAlternate, 58), (.maskShift, 56), (.maskCommand, 55),
             ]
