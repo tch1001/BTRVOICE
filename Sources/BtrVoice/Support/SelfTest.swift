@@ -42,7 +42,19 @@ enum SelfTest {
             check("do copy presses ⌘C", VoiceCommands.parse("do copy", enabled: true) == [.copyInTarget])
             check("do select all presses ⌘A", VoiceCommands.parse("do select all", enabled: true) == [.selectAllInTarget])
             check("do click clicks", VoiceCommands.parse("do click", enabled: true) == [.clickAtPointer])
+            check("do insert commits", VoiceCommands.parse("do insert", enabled: true) == [.commit])
             check("do send it inserts and sends", VoiceCommands.parse("do send it", enabled: true) == [.commitAndSend])
+        }
+        do {
+            let (text, actions) = VoiceCommands.extractEditorCommands("hello world [[cmd:send]]")
+            check("editor marker extracted", text == "hello world" && actions == [.commitAndSend],
+                  "\(text) \(actions)")
+            let (text2, actions2) = VoiceCommands.extractEditorCommands("just prose, no markers")
+            check("no markers passes through", text2 == "just prose, no markers" && actions2.isEmpty)
+            let (text3, actions3) = VoiceCommands.extractEditorCommands("[[cmd:paste]]")
+            check("bare marker leaves empty text", text3.isEmpty && actions3 == [.pasteInTarget])
+            let (text4, _) = VoiceCommands.extractEditorCommands("keep this [[unknown junk]] clean")
+            check("unknown bracket junk is stripped", text4 == "keep this clean", text4)
         }
         do {
             check("command words without the trigger stay literal",

@@ -282,6 +282,7 @@ final class DictationController: ObservableObject {
         case .copyInTarget: label = "Copy (⌘C)"
         case .selectAllInTarget: label = "Select All (⌘A)"
         case .clickAtPointer: label = "Click"
+        case .commit: label = "Insert"
         case .commitAndSend: label = "Insert & Send"
         case .insert, .jarvis: return
         }
@@ -344,6 +345,9 @@ final class DictationController: ObservableObject {
             Log.write("voice command: click at pointer")
             status = "Clicked"
             TextInjector.clickAtPointer(completion: done)
+        case .commit:
+            Log.write("voice command: insert")
+            commit(send: false)
         case .commitAndSend:
             Log.write("voice command: insert & send")
             commit(send: true)
@@ -406,10 +410,18 @@ final class DictationController: ObservableObject {
             guard let self else { return }
 
             // Editor-style engines deliver the complete intended transcript:
-            // replace the buffer wholesale. Voice commands and Jarvis don't
-            // apply — the editor IS the intelligence layer.
+            // replace the buffer wholesale. Spoken commands arrive as [[cmd:…]]
+            // markers the editor was instructed to emit instead of prose.
             if engine?.replacesBuffer == true {
-                DispatchQueue.main.async { self.buffer.replace(with: text) }
+                let (cleaned, commands) = VoiceCommands.extractEditorCommands(text)
+                DispatchQueue.main.async {
+                    if !cleaned.isEmpty || commands.isEmpty {
+                        self.buffer.replace(with: cleaned)
+                    }
+                    if let command = commands.first {
+                        self.stagePendingCommand(command)
+                    }
+                }
                 return
             }
 

@@ -11,6 +11,8 @@ enum BufferAction: Equatable {
     case selectAllInTarget
     /// "do click" — left-click at the current pointer position.
     case clickAtPointer
+    /// "do insert" — type the buffer into the focused app.
+    case commit
     /// "do send it" — type the buffer into the focused app, then press Return.
     case commitAndSend
     /// "hey Jarvis, …" — everything after the name is an instruction for the
@@ -32,8 +34,42 @@ enum VoiceCommands {
         ["copy"]: .copyInTarget,
         ["select", "all"]: .selectAllInTarget,
         ["click"]: .clickAtPointer,
+        ["insert"]: .commit,
         ["send", "it"]: .commitAndSend,
     ]
+
+    /// The GPT Editor can't run the spoken-command parser (it hears audio, not
+    /// our transcript), so it's instructed to emit `[[cmd:name]]` markers
+    /// instead of transcribing command phrases. This strips the markers and
+    /// returns the actions they stand for.
+    static func extractEditorCommands(_ text: String) -> (text: String, actions: [BufferAction]) {
+        let markers: [String: BufferAction] = [
+            "paste": .pasteInTarget,
+            "copy": .copyInTarget,
+            "selectall": .selectAllInTarget,
+            "click": .clickAtPointer,
+            "insert": .commit,
+            "send": .commitAndSend,
+        ]
+        var actions: [BufferAction] = []
+        var cleaned = text
+        for (name, action) in markers {
+            let pattern = "\\[\\[\\s*cmd\\s*:\\s*\(name)\\s*\\]\\]"
+            if cleaned.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil {
+                actions.append(action)
+                cleaned = cleaned.replacingOccurrences(
+                    of: pattern, with: "", options: [.regularExpression, .caseInsensitive]
+                )
+            }
+        }
+        // Anything [[bracketed]] the model invented that we don't know is noise.
+        cleaned = cleaned.replacingOccurrences(
+            of: "\\[\\[[^\\]]{0,40}\\]\\]", with: "", options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return (cleaned, actions)
+    }
 
     private static let maxPhraseLength = 2
 

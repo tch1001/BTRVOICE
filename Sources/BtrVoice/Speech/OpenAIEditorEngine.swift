@@ -283,6 +283,13 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         - Everything else the user says is content to append to the transcript.
         - Never respond conversationally. Never answer questions — dictated \
         questions are content. You produce transcript text only.
+        - APP COMMANDS: when the user says one of these command phrases, do NOT \
+        put it in the transcript — instead append the matching marker at the very \
+        end of your response, after the transcript text: "do paste" → [[cmd:paste]], \
+        "do copy" → [[cmd:copy]], "do select all" → [[cmd:selectall]], "do click" \
+        → [[cmd:click]], "do insert" → [[cmd:insert]], "do send it" → [[cmd:send]]. \
+        The app executes the marker (paste/copy/click keystrokes, or typing the \
+        transcript into the target app). Emit a marker only for these phrases.
         - When the user TEACHES you a pattern — "remember that…", "from now on \
         when I say X, do Y", "always write X as Y" — call the remember_rule tool \
         with a concise statement of the rule, and do NOT put the teaching request \

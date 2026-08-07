@@ -397,7 +397,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         “do copy” — press ⌘C
         “do select all” — press ⌘A
         “do click” — click at the mouse pointer
+        “do insert” — type the buffer into the focused app
         “do send it” — insert the buffer, then press Return
+        (These work in the GPT Editor engine too.)
 
         Say “Jarvis” (or “hey Jarvis”) followed by an instruction:
         “Jarvis, clean this up” — rewrite the staged text

@@ -48,7 +48,7 @@ final class TextBuffer: ObservableObject {
                 pushUndo()
                 text = joined(text, fragment)
                 changed = true
-            case .pasteInTarget, .copyInTarget, .selectAllInTarget, .clickAtPointer, .commitAndSend, .jarvis:
+            case .pasteInTarget, .copyInTarget, .selectAllInTarget, .clickAtPointer, .commit, .commitAndSend, .jarvis:
                 escalated.append(action)
             }
         }
