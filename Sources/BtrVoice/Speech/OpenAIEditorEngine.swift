@@ -50,6 +50,10 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     private var rawPartial = ""
     private var errorReported = false
     private var transcriptionRetried = false
+    /// The transcript the editor last produced — the base a fallback appends to.
+    private var lastTranscript: String
+    /// Fires when recognised speech has sat with no model response.
+    private var rescueTimer: Timer?
 
     enum EngineError: LocalizedError {
         case noKey
@@ -65,6 +69,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
 
     init(seedTranscript: String) {
         self.seedTranscript = seedTranscript
+        self.lastTranscript = seedTranscript
     }
 
     func start() throws {
@@ -102,6 +107,8 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.lock()
         finishing = true
         lock.unlock()
+        // Don't strand recognised speech if the session ends before a response.
+        DispatchQueue.main.async { self.armRescue() }
         // Flush any trailing audio and ask for one last transcript pass.
         send(["type": "input_audio_buffer.commit"])
         send(["type": "response.create"])
@@ -116,6 +123,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.lock()
         cancelled = true
         lock.unlock()
+        DispatchQueue.main.async { self.rescueTimer?.invalidate() }
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
     }
@@ -169,7 +177,10 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             let partial = rawPartial
             lock.unlock()
             if !partial.isEmpty { EditorActivityLog.post(.heard, "“\(partial)”") }
-            emit { self.onPartial?(partial) }
+            emit {
+                self.onPartial?(partial)
+                self.armRescue()
+            }
 
         case "input_audio_buffer.speech_started":
             EditorActivityLog.post(.info, "Speech detected — listening to the turn")
@@ -305,6 +316,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.lock()
         var transcript = pendingReply
         pendingReply = ""
+        let speech = rawPartial.trimmingCharacters(in: .whitespacesAndNewlines)
         rawPartial = ""
         let stillFinishing = finishing
         lock.unlock()
@@ -328,14 +340,26 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 }
             }
         }
-        let cleaned = JarvisEngine.sanitize(transcript)
+        var cleaned = JarvisEngine.sanitize(transcript)
         if !cleaned.isEmpty {
             EditorActivityLog.post(.rewrote, cleaned)
+        } else if !calledTool, !speech.isEmpty {
+            // The model produced no transcript for words the user actually
+            // spoke. Without this the recognised text would sit grey forever —
+            // never confirmed, never insertable. Fall back to the raw speech,
+            // appended to what the transcript already held.
+            cleaned = joined(lastTranscript, speech)
+            EditorActivityLog.post(.info, "Editor returned nothing — keeping the recognised words as-is")
         } else if !calledTool {
             EditorActivityLog.post(.info, "Editor responded with no transcript change")
         }
+        if !cleaned.isEmpty { lastTranscript = cleaned }
         emit {
+            self.rescueTimer?.invalidate()
             self.onReplacementPreview?(nil)
+            // Any grey tail has been folded into the confirmed text (or was
+            // nothing at all) — never leave it stranded on screen.
+            self.onPartial?("")
             if !cleaned.isEmpty { self.onSegmentFinal?(cleaned) }
         }
         if calledTool {
@@ -343,6 +367,39 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             send(["type": "response.create"])
         } else if stillFinishing {
             completeFinish()
+        }
+    }
+
+    private func joined(_ lhs: String, _ rhs: String) -> String {
+        if lhs.isEmpty { return rhs }
+        if rhs.isEmpty { return lhs }
+        return lhs + " " + rhs
+    }
+
+    /// Nothing came back for speech we already recognised — promote it rather
+    /// than leaving the user with a grey transcript they can't insert.
+    /// (Re)starts the watchdog. Must run on the main thread — Timer needs a run loop.
+    private func armRescue() {
+        rescueTimer?.invalidate()
+        rescueTimer = Timer.scheduledTimer(withTimeInterval: 12, repeats: false) { [weak self] _ in
+            self?.rescueOrphanedPartial()
+        }
+    }
+
+    private func rescueOrphanedPartial() {
+        lock.lock()
+        let speech = rawPartial.trimmingCharacters(in: .whitespacesAndNewlines)
+        let quiet = pendingReply.isEmpty
+        if !speech.isEmpty, quiet { rawPartial = "" }
+        lock.unlock()
+        guard !speech.isEmpty, quiet else { return }
+        let rescued = joined(lastTranscript, speech)
+        lastTranscript = rescued
+        Log.write("gpt-editor: rescued orphaned partial — \(speech)")
+        EditorActivityLog.post(.info, "No response arrived — kept the recognised words")
+        emit {
+            self.onPartial?("")
+            self.onSegmentFinal?(rescued)
         }
     }
 
@@ -477,13 +534,20 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     }
 
     private func completeFinish() {
+        // Recognised-but-unanswered speech would die with the session; keep it.
+        DispatchQueue.main.async { self.rescueOrphanedPartial() }
         lock.lock()
         let alreadyCancelled = cancelled
         cancelled = true
         lock.unlock()
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
-        if !alreadyCancelled { emit { self.onFinished?() } }
+        if !alreadyCancelled {
+            emit {
+                self.rescueTimer?.invalidate()
+                self.onFinished?()
+            }
+        }
     }
 
     private func send(_ event: [String: Any]) {
