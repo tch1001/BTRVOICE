@@ -228,6 +228,25 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                     ],
                     [
                         "type": "function",
+                        "name": "update_rule",
+                        "description": "Revise an existing standing rule instead of creating a duplicate. Use when the user corrects or refines a rule you already have ('actually, make that rule say…', 'change the github rule to…'). The rule keeps its number and gets a new version.",
+                        "parameters": [
+                            "type": "object",
+                            "properties": [
+                                "number": [
+                                    "type": "integer",
+                                    "description": "The rule's number as shown in your standing-rules list (1-based).",
+                                ],
+                                "rule": [
+                                    "type": "string",
+                                    "description": "The complete revised rule text, self-contained.",
+                                ],
+                            ],
+                            "required": ["number", "rule"],
+                        ],
+                    ],
+                    [
+                        "type": "function",
                         "name": "app_command",
                         "description": "Perform an action in the dictation app. Call this whenever the user asks for one of these actions in ANY phrasing — 'do copy', 'copy the text', 'copy the highlighted text' all mean copy. The app shows the user a confirmation before executing, so calling this is safe.",
                         "parameters": [
@@ -354,6 +373,16 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 EditorActivityLog.post(.tool, "Learned a rule: \(rule)")
                 emit { self.onStatus?("Editor learned a rule (see Jarvis menu)") }
             }
+        case "update_rule":
+            if let number = args["number"] as? Int,
+               let rule = args["rule"] as? String,
+               let version = JarvisNotes.shared.update(number: number, text: rule) {
+                output = #"{"status":"updated","version":\#(version)}"#
+                EditorActivityLog.post(.tool, "Revised rule #\(number) → v\(version): \(rule)")
+                emit { self.onStatus?("Editor revised rule #\(number) (now v\(version))") }
+            } else {
+                output = #"{"status":"error","detail":"no such rule number"}"#
+            }
         case "app_command":
             let mapping: [String: BufferAction] = [
                 "paste": .pasteInTarget,
@@ -413,6 +442,9 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         when I say X, do Y", "always write X as Y" — call the remember_rule tool \
         with a concise statement of the rule, and do NOT put the teaching request \
         into the transcript. Apply the rule from that moment on.
+        - When the user CORRECTS or refines a rule you already have, call \
+        update_rule with that rule's number from your standing-rules list — never \
+        create a near-duplicate with remember_rule.
         \(notes.isEmpty ? "" : "\nStanding rules from the user (apply these):\n\(notes)")
         """
     }

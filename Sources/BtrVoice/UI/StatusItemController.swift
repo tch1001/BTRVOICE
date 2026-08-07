@@ -58,29 +58,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         dictate.keyEquivalentModifierMask = [.option]
         menu.addItem(dictate)
 
-        let insert = item("Insert Buffer into Frontmost App", action: #selector(commit))
-        insert.keyEquivalent = "\r"
-        insert.keyEquivalentModifierMask = [.option]
-        insert.isEnabled = !controller.buffer.isEmpty
-        menu.addItem(insert)
-
-        menu.addItem(item("Insert & Send", action: #selector(commitAndSend), enabled: !controller.buffer.isEmpty))
-        menu.addItem(item("Show Dictation Panel", action: #selector(togglePanel)))
-        menu.addItem(.separator())
-
-        let preview = controller.buffer.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let previewItem = NSMenuItem(
-            title: preview.isEmpty ? "Buffer is empty" : "“\(Self.truncate(preview))”",
-            action: nil,
-            keyEquivalent: ""
-        )
-        previewItem.isEnabled = false
-        menu.addItem(previewItem)
-        if !preview.isEmpty {
-            menu.addItem(item("Copy Buffer", action: #selector(copyBuffer)))
-            menu.addItem(item("Clear Buffer", action: #selector(clearBuffer)))
-        }
-
+        // Everything else buffer-related lives in the panel UI — the menu stays
+        // minimal: dictate, Jarvis, settings, health.
         menu.addItem(.separator())
         menu.addItem(jarvisItem())
         menu.addItem(settingsItem())
@@ -168,29 +147,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         submenu.addItem(.separator())
-        let notes = JarvisNotes.shared.notes
-        if notes.isEmpty {
-            let empty = NSMenuItem(title: "No notes yet — say “Jarvis, remember …”", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            submenu.addItem(empty)
-        } else {
-            let header = NSMenuItem(title: "Notes (\(notes.count))", action: nil, keyEquivalent: "")
-            header.isEnabled = false
-            submenu.addItem(header)
-            for note in notes {
-                let entry = NSMenuItem(title: Self.truncate(note.text), action: nil, keyEquivalent: "")
-                entry.toolTip = note.text
-                let noteMenu = NSMenu()
-                let delete = NSMenuItem(title: "Delete This Note", action: #selector(deleteJarvisNote(_:)), keyEquivalent: "")
-                delete.target = self
-                delete.representedObject = note.id.uuidString
-                noteMenu.addItem(delete)
-                entry.submenu = noteMenu
-                submenu.addItem(entry)
-            }
-            submenu.addItem(.separator())
-            submenu.addItem(item("Delete All Notes…", action: #selector(deleteAllJarvisNotes)))
-        }
+        let count = JarvisNotes.shared.notes.count
+        submenu.addItem(item(
+            count == 0 ? "Rules… (none yet)" : "Rules… (\(count))",
+            action: #selector(showJarvisNotes)
+        ))
 
         parent.submenu = submenu
         return parent
@@ -239,30 +200,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         engine.submenu = engineMenu
         submenu.addItem(engine)
 
-        let injection = NSMenuItem(title: "How to insert text", action: nil, keyEquivalent: "")
-        let injectionMenu = NSMenu()
-        for mode in InjectionMode.allCases {
-            let entry = NSMenuItem(title: mode.label, action: #selector(selectInjectionMode(_:)), keyEquivalent: "")
-            entry.target = self
-            entry.representedObject = mode.rawValue
-            entry.state = settings.injectionMode == mode ? .on : .off
-            injectionMenu.addItem(entry)
-        }
-        injection.submenu = injectionMenu
-        submenu.addItem(injection)
-
-        let newline = NSMenuItem(title: "How to type newlines", action: nil, keyEquivalent: "")
-        let newlineMenu = NSMenu()
-        for mode in NewlineMode.allCases {
-            let entry = NSMenuItem(title: mode.label, action: #selector(selectNewlineMode(_:)), keyEquivalent: "")
-            entry.target = self
-            entry.representedObject = mode.rawValue
-            entry.state = settings.newlineMode == mode ? .on : .off
-            newlineMenu.addItem(entry)
-        }
-        newline.submenu = newlineMenu
-        submenu.addItem(newline)
-
         parent.submenu = submenu
         return parent
     }
@@ -290,11 +227,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: - Actions
 
     @objc private func toggleDictation() { controller.toggleDictation() }
-    @objc private func commit() { controller.commit(send: false) }
-    @objc private func commitAndSend() { controller.commit(send: true) }
-    @objc private func togglePanel() { onTogglePanel?() }
-    @objc private func copyBuffer() { controller.copyBufferToPasteboard() }
-    @objc private func clearBuffer() { controller.clearBuffer() }
 
     @objc private func toggleOnDevice() { settings.onDeviceOnly.toggle() }
     @objc private func toggleAutoPunctuation() { settings.autoPunctuation.toggle() }
@@ -304,6 +236,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleClearAfterCommit() { settings.clearAfterCommit.toggle() }
     @objc private func toggleHideAfterCommit() { settings.hideAfterCommit.toggle() }
     @objc private func toggleJarvisAuto() { settings.jarvisAutoCleanup.toggle() }
+
+    @objc private func showJarvisNotes() {
+        Task { @MainActor in JarvisNotesWindowController.shared.show() }
+    }
     @objc private func selectJarvisBackend(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let choice = JarvisBackend(rawValue: raw) else { return }
@@ -338,38 +274,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
 
-    @objc private func deleteJarvisNote(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let id = UUID(uuidString: raw) else { return }
-        JarvisNotes.shared.delete(id: id)
-    }
-
-    @objc private func deleteAllJarvisNotes() {
-        let alert = NSAlert()
-        alert.messageText = "Delete all of Jarvis's notes?"
-        alert.informativeText = "Jarvis will forget every saved rule. This cannot be undone."
-        alert.addButton(withTitle: "Delete All")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            JarvisNotes.shared.deleteAll()
-        }
-    }
-
     @objc private func selectEngine(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let choice = SpeechEngineChoice(rawValue: raw) else { return }
         settings.engineChoice = choice
         Log.write("engine choice → \(choice.label) (active: \(DictationController.resolveEngine(from: choice)))")
-    }
-
-    @objc private func selectInjectionMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let mode = InjectionMode(rawValue: raw) else { return }
-        settings.injectionMode = mode
-    }
-
-    @objc private func selectNewlineMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let mode = NewlineMode(rawValue: raw) else { return }
-        settings.newlineMode = mode
     }
 
     @objc private func openMicSettings() { Permissions.openSettings(.microphone) }

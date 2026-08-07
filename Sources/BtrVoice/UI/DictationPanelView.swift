@@ -174,7 +174,10 @@ struct DictationPanelView: View {
             if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
         }
         .gesture(
-            DragGesture(minimumDistance: 1)
+            // Global coordinate space: the handle itself shifts as the width
+            // changes, so measuring translation locally double-counts every
+            // delta and jitters. Global translation tracks the actual cursor.
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
                     let start = brainDragStartWidth ?? settings.editorBrainWidth
                     if brainDragStartWidth == nil { brainDragStartWidth = start }
