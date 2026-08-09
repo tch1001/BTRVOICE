@@ -34,6 +34,7 @@ class Bridge(QObject):
     toggle = Signal()
     commit = Signal()
     discard = Signal()
+    toggle_panel = Signal()
 
 
 class BtrVoiceApp:
@@ -57,6 +58,7 @@ class BtrVoiceApp:
             on_commit=self.bridge.commit.emit,
             on_discard=self.bridge.discard.emit,
             on_toggle=self.bridge.toggle.emit,
+            on_hide=self.bridge.toggle_panel.emit,
         )
 
         self._wire()
@@ -77,6 +79,7 @@ class BtrVoiceApp:
         self.bridge.toggle.connect(self.toggle)
         self.bridge.commit.connect(self.commit)
         self.bridge.discard.connect(self.discard)
+        self.bridge.toggle_panel.connect(self.toggle_panel)
 
         # Partials are pulled rather than pushed: the engine only knows time has
         # passed when we tell it, and a timer keeps that off the audio path.
@@ -107,9 +110,9 @@ class BtrVoiceApp:
         commit.triggered.connect(self.bridge.commit.emit)
         menu.addAction(commit)
         menu.addSeparator()
-        show = QAction("Show panel")
-        show.triggered.connect(self.panel.show)
-        menu.addAction(show)
+        self._tray_panel = QAction("Hide panel  (F7)")
+        self._tray_panel.triggered.connect(self.bridge.toggle_panel.emit)
+        menu.addAction(self._tray_panel)
         menu.addSeparator()
         quit_action = QAction("Quit")
         quit_action.triggered.connect(self.shutdown)
@@ -170,6 +173,20 @@ class BtrVoiceApp:
             self.panel.flash("no target window — text kept")
         self._refresh()
 
+    def toggle_panel(self) -> None:
+        """Show/hide the panel without touching dictation.
+
+        Hiding is safe because quitOnLastWindowClosed is off and the tray icon
+        is the app's real home — dictation, hotkeys and the buffer all survive
+        the panel going away.
+        """
+        if self.panel.isVisible():
+            self.panel.hide()
+            self._tray_panel.setText("Show panel  (F7)")
+        else:
+            self.panel.show()
+            self._tray_panel.setText("Hide panel  (F7)")
+
     def discard(self) -> None:
         self.buffer.clear()
         self.engine.discard_utterance()
@@ -202,6 +219,7 @@ class BtrVoiceApp:
                 "<f9>": self.bridge.toggle.emit,
                 "<f10>": self.bridge.commit.emit,
                 "<f8>": self.bridge.discard.emit,
+                "<f7>": self.bridge.toggle_panel.emit,
             },
             on_error=self.bridge.error.emit,
         )

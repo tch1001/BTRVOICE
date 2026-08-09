@@ -41,11 +41,13 @@ class DictationPanel(QWidget):
         on_commit: Callable[[], None],
         on_discard: Callable[[], None],
         on_toggle: Callable[[], None],
+        on_hide: Callable[[], None] | None = None,
     ):
         super().__init__()
         self._on_commit = on_commit
         self._on_discard = on_discard
         self._on_toggle = on_toggle
+        self._on_hide = on_hide or self.hide
 
         self.setWindowTitle("BtrVoice")
         self.setWindowFlags(
@@ -71,6 +73,22 @@ class DictationPanel(QWidget):
         header.addWidget(self._status)
         header.addStretch()
         header.addWidget(self._target)
+
+        # Hides the panel; the app keeps running in the tray. Not a quit button —
+        # dictation and the hotkeys carry on with the panel out of the way.
+        close = QPushButton("✕")
+        close.setCursor(Qt.PointingHandCursor)
+        close.setFocusPolicy(Qt.NoFocus)
+        close.setFixedSize(20, 20)
+        close.setToolTip("Hide panel (F7) — BtrVoice stays in the tray")
+        close.setStyleSheet(
+            """QPushButton { background: transparent; color:#6b7079; border:none;
+                   font-size:14px; }
+               QPushButton:hover { color:#e8eaed; }"""
+        )
+        close.clicked.connect(lambda: self._on_hide())
+        header.addSpacing(6)
+        header.addWidget(close)
         root.addLayout(header)
 
         self._text = QTextEdit()
