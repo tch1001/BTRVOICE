@@ -21,9 +21,10 @@ SAMPLE_RATE = 16_000
 CHANNELS = 1
 SAMPLE_WIDTH = 2  # s16le
 
-# 32ms per frame. webrtcvad only accepts 10/20/30ms frames, so the VAD layer
-# re-slices; this size is about latency of the read loop, not of detection.
-FRAME_MS = 32
+# 20ms per frame, matching webrtcvad's frame size exactly. The VAD layer can
+# re-slice arbitrary sizes, but picking one that divides evenly means capture
+# frames map 1:1 onto VAD frames with no residual buffer and no added latency.
+FRAME_MS = 20
 FRAME_BYTES = int(SAMPLE_RATE * FRAME_MS / 1000) * SAMPLE_WIDTH * CHANNELS
 
 
@@ -56,6 +57,17 @@ def default_source() -> str | None:
         if not name.endswith(".monitor"):
             return name
     return sources[0][0] if sources else None
+
+
+def has_real_input() -> bool:
+    """True when a genuine capture device exists.
+
+    Worth asking separately from `default_source`, because a machine with only a
+    monitor source will happily "record" — it just transcribes whatever is
+    playing instead of whatever was said, which looks like a broken microphone
+    rather than a missing one.
+    """
+    return any(not name.endswith(".monitor") for name, _ in list_sources())
 
 
 class MicCapture:
