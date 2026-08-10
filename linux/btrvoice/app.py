@@ -103,25 +103,28 @@ class BtrVoiceApp:
         painter.end()
 
         self.tray = QSystemTrayIcon(QIcon(pix))
-        menu = QMenu()
-        self._tray_toggle = QAction("Start dictating  (F9)")
-        self._tray_toggle.triggered.connect(self.bridge.toggle.emit)
-        menu.addAction(self._tray_toggle)
-        commit = QAction("Commit to focused app  (F10)")
-        commit.triggered.connect(self.bridge.commit.emit)
-        menu.addAction(commit)
-        menu.addSeparator()
-        self._tray_panel = QAction("Hide panel  (F7)")
-        self._tray_panel.triggered.connect(self.bridge.toggle_panel.emit)
-        menu.addAction(self._tray_panel)
-        menu.addSeparator()
-        restart_action = QAction("Restart BtrVoice")
-        restart_action.triggered.connect(self.restart)
-        menu.addAction(restart_action)
-        quit_action = QAction("Quit BtrVoice")
-        quit_action.triggered.connect(self.shutdown)
-        menu.addAction(quit_action)
-        self.tray.setContextMenu(menu)
+        # The menu and every action are parented to `self`. QMenu.addAction does
+        # NOT take ownership in PySide6, so an action held only by a local goes
+        # away when this method returns and silently vanishes from the menu —
+        # leaving a menu that looks fine in the source and is missing items on
+        # screen. Parenting keeps them alive for the app's lifetime.
+        self._menu = QMenu()
+
+        def item(label: str, slot) -> QAction:
+            action = QAction(label, self._menu)
+            action.triggered.connect(slot)
+            self._menu.addAction(action)
+            return action
+
+        self._tray_toggle = item("Start dictating  (F9)", self.bridge.toggle.emit)
+        item("Commit to focused app  (F10)", self.bridge.commit.emit)
+        self._menu.addSeparator()
+        self._tray_panel = item("Hide panel  (F7)", self.bridge.toggle_panel.emit)
+        self._menu.addSeparator()
+        item("Restart BtrVoice", self.restart)
+        item("Quit BtrVoice", self.shutdown)
+
+        self.tray.setContextMenu(self._menu)
         self.tray.setToolTip("BtrVoice")
         self.tray.show()
 
