@@ -11,6 +11,7 @@ happens in a slot.
 
 from __future__ import annotations
 
+import os
 import sys
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -114,7 +115,10 @@ class BtrVoiceApp:
         self._tray_panel.triggered.connect(self.bridge.toggle_panel.emit)
         menu.addAction(self._tray_panel)
         menu.addSeparator()
-        quit_action = QAction("Quit")
+        restart_action = QAction("Restart BtrVoice")
+        restart_action.triggered.connect(self.restart)
+        menu.addAction(restart_action)
+        quit_action = QAction("Quit BtrVoice")
         quit_action.triggered.connect(self.shutdown)
         menu.addAction(quit_action)
         self.tray.setContextMenu(menu)
@@ -227,9 +231,42 @@ class BtrVoiceApp:
         self.panel.set_status("ready — F9 to dictate, F10 to commit")
         return self.qt.exec()
 
-    def shutdown(self) -> None:
+    def _teardown(self) -> None:
+        """Release everything that outlives a plain process exit.
+
+        `parec` is a real child process and the pynput listener owns an X grab;
+        neither is cleaned up for us. This matters most on restart, where
+        execv replaces the process image — an un-terminated parec would be
+        reparented to init and hold the capture stream open against the new
+        instance.
+        """
         self.stop_listening()
         self.engine.cancel()
         self.tracker.stop()
         self.hotkeys.stop()
+
+    def restart(self) -> None:
+        """Re-exec with the same arguments the user launched with.
+
+        Cheaper than it looks: the model cache is warm, so a restart costs the
+        load time rather than the download. Useful after changing a setting
+        that's only read at startup.
+        """
+        self._teardown()
+        # Take the UI down before the image is replaced, or the tray icon
+        # lingers as a dead item until the shell notices the bus name vanish.
+        self.panel.hide()
+        self.tray.hide()
+        self.qt.processEvents()
+        argv = [sys.executable, "-m", "btrvoice", *sys.argv[1:]]
+        try:
+            os.execv(sys.executable, argv)
+        except OSError as exc:  # exec failed, so we still own the process
+            self.tray.show()
+            self.panel.show()
+            self._on_error(f"restart failed: {exc}")
+
+    def shutdown(self) -> None:
+        self._teardown()
+        self.tray.hide()
         self.qt.quit()

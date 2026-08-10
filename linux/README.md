@@ -21,6 +21,30 @@ cd linux
 | `F9` | start / stop dictating |
 | `F10` | commit the buffer into the focused window |
 | `F8` | discard the buffer |
+| `F7` | hide / show the panel (the app stays in the tray) |
+
+## The tray menu
+
+The tray icon is the app's real home — the panel is just a view onto it, and
+hiding the panel doesn't stop anything.
+
+| Item | Notes |
+| --- | --- |
+| Start / Stop dictating | mirrors `F9`, label follows the state |
+| Commit to focused app | mirrors `F10` |
+| Hide / Show panel | mirrors `F7`, label follows the state |
+| Restart BtrVoice | re-execs with the same arguments; cheap, since the model cache is warm |
+| Quit BtrVoice | terminates `parec` and releases the hotkey grab before exiting |
+
+Restart and quit both go through the same teardown. That matters more than it
+sounds: `parec` is a real child process and the hotkey listener owns an X grab,
+and neither is cleaned up by process exit alone. On restart in particular,
+`execv` replaces the process image — an un-terminated `parec` would be reparented
+to init and hold the capture stream open against the incoming instance.
+
+Requires a system-tray host. GNOME needs the **AppIndicator** extension
+(`ubuntu-appindicators` on Ubuntu); without it the icon never appears and `F7`
+becomes the only way to get the panel back.
 
 ## How it maps onto the macOS app
 
