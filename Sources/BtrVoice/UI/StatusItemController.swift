@@ -58,6 +58,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         dictate.keyEquivalentModifierMask = [.option]
         menu.addItem(dictate)
 
+        // The fleet's Jarvis — a separate window, a separate pipeline. Deliberately
+        // additive: nothing about dictation changes whether this is used or not.
+        menu.addItem(item("Start Jarvis", action: #selector(startJarvis)))
+
         // Everything else buffer-related lives in the panel UI — the menu stays
         // minimal: dictate, Jarvis, settings, health.
         menu.addItem(.separator())
@@ -227,6 +231,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: - Actions
 
     @objc private func toggleDictation() { controller.toggleDictation() }
+
+    @objc private func startJarvis() {
+        DispatchQueue.main.async { JarvisSurfaceWindowController.shared.show() }
+    }
 
     @objc private func toggleOnDevice() { settings.onDeviceOnly.toggle() }
     @objc private func toggleAutoPunctuation() { settings.autoPunctuation.toggle() }
