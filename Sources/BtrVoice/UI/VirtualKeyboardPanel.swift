@@ -250,7 +250,17 @@ final class VirtualKeyboardController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isExcludedFromWindowsMenu = true
         panel.isReleasedWhenClosed = false
-        panel.setContentSize(hosting.view.fittingSize)
+
+        // Force a layout pass before measuring: `fittingSize` is (0, 0) until the
+        // SwiftUI hosting view has laid out, and a zero-size panel is on screen but
+        // invisible — which is exactly why the keyboard "opened" yet nothing appeared.
+        hosting.view.layoutSubtreeIfNeeded()
+        var size = hosting.view.fittingSize
+        if size.width < 100 || size.height < 60 {
+            // Last-resort fallback so a measurement miss can never hide the window.
+            size = NSSize(width: 760, height: 300)
+        }
+        panel.setContentSize(size)
 
         // Bottom-centre of the screen, where a keyboard belongs.
         if let screen = NSScreen.main {

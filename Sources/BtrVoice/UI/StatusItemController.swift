@@ -62,6 +62,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // additive: nothing about dictation changes whether this is used or not.
         menu.addItem(item("Start Jarvis", action: #selector(startJarvis)))
 
+        // An on-screen keyboard, like macOS's Accessibility Keyboard: clickable keys
+        // that type into whatever app has focus.
+        menu.addItem(item(
+            VirtualKeyboardController.shared.isVisible ? "Hide Virtual Keyboard" : "Virtual Keyboard",
+            action: #selector(toggleVirtualKeyboard)
+        ))
+
         // Everything else buffer-related lives in the panel UI — the menu stays
         // minimal: dictate, Jarvis, settings, health.
         menu.addItem(.separator())
@@ -238,6 +245,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func startJarvis() {
         DispatchQueue.main.async { JarvisSurfaceWindowController.shared.show() }
+    }
+
+    @objc private func toggleVirtualKeyboard() {
+        DispatchQueue.main.async { VirtualKeyboardController.shared.toggle() }
     }
 
     @objc private func toggleOnDevice() { settings.onDeviceOnly.toggle() }
