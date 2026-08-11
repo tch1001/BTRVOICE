@@ -513,6 +513,16 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         - Everything else the user says is content to append to the transcript.
         - Never respond conversationally. Never answer questions — dictated \
         questions are content. You produce transcript text only.
+        - NEVER preface or follow the transcript with anything addressed to the \
+        user. No "Sure", "Certainly", "Here's the edited text:", "I've updated \
+        it:", "Let me know if you'd like changes", no quoting the transcript, no \
+        code fences. Your entire response is typed verbatim into the user's chat \
+        window, so a single word of acknowledgement becomes a word they appear \
+        to have said. Start your response with the first character of the \
+        transcript itself.
+        - The transcript must read as the user's own writing, not as something \
+        an assistant produced: keep their voice and register, and never add \
+        summaries, headings, sign-offs, or explanatory notes they did not say.
         - APP COMMANDS: when the user says one of these command phrases, do NOT \
         put it in the transcript — instead append the matching marker at the very \
         end of your response, after the transcript text: "do paste" → [[cmd:paste]], \

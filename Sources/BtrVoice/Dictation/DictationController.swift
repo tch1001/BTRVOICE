@@ -94,6 +94,7 @@ final class DictationController: ObservableObject {
         guard phase == .listening else { return }
         phase = .finishing
         status = "Finishing…"
+        micLiveSince = nil
         audio.stop()
         stopPolicyTimer()
         level = 0
@@ -122,7 +123,9 @@ final class DictationController: ObservableObject {
         pendingCommitDeadline?.invalidate()
         pendingCommandTimer?.invalidate()
         pendingCommand = nil
+        setInputHold(false)
         if phase == .listening || phase == .finishing {
+            micLiveSince = nil
             audio.stop()
             stopPolicyTimer()
             // Cancelling marks every segment resolved, so no late result can push text
@@ -188,6 +191,12 @@ final class DictationController: ObservableObject {
     /// Applies a finalised segment's actions to the buffer and routes any
     /// escalated command. Safe to call from any thread.
     private func applySegmentActions(_ actions: [BufferAction]) {
+        // Jarvis auto-cleanup resolves asynchronously, so its result can arrive
+        // after a command countdown has started — same freeze applies.
+        guard !inputOnHold else {
+            Log.write("segment dropped — command countdown active")
+            return
+        }
         let escalated = buffer.apply(actions)
         guard let request = escalated.first else { return }
         // A spoken command would otherwise re-enter the engine from inside its
@@ -248,19 +257,77 @@ final class DictationController: ObservableObject {
             let text = buffer.committedText
             status = "Jarvis is thinking…"
             Log.write("jarvis: edit — \(utterance)")
-            Task { [weak self] in
-                do {
-                    let result = try await JarvisEngine.rewrite(text, utterance: utterance)
-                    await MainActor.run {
-                        guard let self else { return }
-                        self.buffer.replace(with: result)
-                        self.status = "Jarvis updated the text (undo: ⌘Z in panel)"
-                    }
-                } catch {
-                    await MainActor.run {
-                        self?.status = "Jarvis failed: \(error.localizedDescription)"
-                        Log.write("jarvis: edit failed — \(error.localizedDescription)")
-                    }
+            captureJarvisContext(for: utterance) { [weak self] context in
+                self?.runJarvisEdit(text, utterance: utterance, context: context)
+            }
+        }
+    }
+
+    /// Gathers the clipboard and/or the user's current selection, but only when
+    /// the utterance asked for them: reading the selection costs a ⌘C in their
+    /// app (which replaces the clipboard), and the clipboard itself may hold
+    /// things they would not want sent to a cloud backend.
+    private func captureJarvisContext(
+        for utterance: String, completion: @escaping (JarvisEngine.Context) -> Void
+    ) {
+        let wantsClipboard = JarvisEngine.wants(.clipboard, in: utterance)
+        let wantsSelection = JarvisEngine.wants(.selection, in: utterance)
+        guard wantsClipboard || wantsSelection else {
+            completion(.none)
+            return
+        }
+
+        guard wantsSelection, Permissions.accessibilityGranted else {
+            // Clipboard alone needs no keystroke and no focus change.
+            if wantsSelection {
+                status = "Jarvis needs Accessibility to read the selection"
+            }
+            // Only ever hand over what was actually asked for.
+            completion(JarvisEngine.Context(
+                clipboard: wantsClipboard ? Clipboard.text : nil, selection: nil
+            ))
+            return
+        }
+
+        status = "Jarvis is reading your selection…"
+        Log.write("jarvis: capturing selection via ⌘C")
+        // ⌘C has to land in the app the user was working in, not in our panel.
+        releaseFocus?()
+        targets.focusTarget { [weak self] focused in
+            guard let self else { return }
+            if !focused {
+                Log.write("jarvis: could not refocus target — copying anyway")
+            }
+            Clipboard.captureSelection { selection in
+                if selection == nil {
+                    self.status = "Jarvis found nothing selected"
+                }
+                completion(JarvisEngine.Context(
+                    clipboard: wantsClipboard ? Clipboard.text : nil,
+                    selection: selection
+                ))
+            }
+        }
+    }
+
+    private func runJarvisEdit(
+        _ text: String, utterance: String, context: JarvisEngine.Context
+    ) {
+        status = "Jarvis is thinking…"
+        Task { [weak self] in
+            do {
+                let result = try await JarvisEngine.rewrite(
+                    text, utterance: utterance, context: context
+                )
+                await MainActor.run {
+                    guard let self else { return }
+                    self.buffer.replace(with: result)
+                    self.status = "Jarvis updated the text (undo: ⌘Z in panel)"
+                }
+            } catch {
+                await MainActor.run {
+                    self?.status = "Jarvis failed: \(error.localizedDescription)"
+                    Log.write("jarvis: edit failed — \(error.localizedDescription)")
                 }
             }
         }
@@ -280,6 +347,37 @@ final class DictationController: ObservableObject {
 
     @Published private(set) var pendingCommand: PendingCommand?
     private var pendingCommandTimer: Timer?
+
+    /// When the microphone last went live, or nil if it isn't. Push-to-talk asks
+    /// this rather than timing the keypress — see `beginSession`.
+    private(set) var micLiveSince: Date?
+
+    /// How long the mic must have been live before a key release counts as the end
+    /// of a push-to-talk hold. Below this the release is a tap, and dictation stays
+    /// on. Generous on purpose: releasing early is common, and the cost of getting
+    /// it wrong (a session that dies before capturing anything) is far worse than
+    /// the cost of staying on for a deliberate hold that was slightly too short.
+    static let minimumHoldToCapture: TimeInterval = 0.6
+
+    /// True when a key release should be treated as the end of a push-to-talk hold.
+    var holdHasCapturedAudio: Bool {
+        guard let micLiveSince else { return false }
+        return Date().timeIntervalSince(micLiveSince) >= Self.minimumHoldToCapture
+    }
+
+    /// While a command countdown is showing, the staged text is frozen: speech
+    /// keeps being recognised, but nothing it produces may touch the buffer.
+    /// Engine callbacks arrive on arbitrary queues, so the flag is lock-guarded
+    /// rather than read off `pendingCommand` (main-thread-only).
+    private let inputHoldLock = NSLock()
+    private var inputHeldFlag = false
+    private var inputOnHold: Bool {
+        inputHoldLock.lock(); defer { inputHoldLock.unlock() }
+        return inputHeldFlag
+    }
+    private func setInputHold(_ held: Bool) {
+        inputHoldLock.lock(); inputHeldFlag = held; inputHoldLock.unlock()
+    }
 
     /// A spoken command doesn't fire immediately: the panel shows what's about to
     /// happen, and the user gets a few seconds to cancel it (or fire it early).
@@ -302,6 +400,7 @@ final class DictationController: ObservableObject {
             label: label,
             firesAt: Date().addingTimeInterval(Self.pendingCommandGrace)
         )
+        setInputHold(true)
         showPanel?()
         pendingCommandTimer = Timer.scheduledTimer(
             withTimeInterval: Self.pendingCommandGrace, repeats: false
@@ -316,6 +415,12 @@ final class DictationController: ObservableObject {
         pendingCommandTimer = nil
         guard let pending = pendingCommand else { return }
         pendingCommand = nil
+        setInputHold(false)
+        // Anything spoken during the countdown was dropped from the buffer;
+        // also mark it stale in the engine so a final result landing after the
+        // commit can't push held-back text into the freshly cleared buffer.
+        if case .commit = pending.action { engine?.discardUtterance() }
+        if case .commitAndSend = pending.action { engine?.discardUtterance() }
         perform(pending.action)
     }
 
@@ -323,6 +428,7 @@ final class DictationController: ObservableObject {
         pendingCommandTimer?.invalidate()
         pendingCommandTimer = nil
         pendingCommand = nil
+        setInputHold(false)
         status = "Command cancelled"
     }
 
@@ -441,7 +547,8 @@ final class DictationController: ObservableObject {
         usingOnDeviceRecognition = engine.isOnDevice
 
         engine.onPartial = { [weak self] text in
-            self?.buffer.setPartial(text)
+            guard let self, !self.inputOnHold else { return }
+            self.buffer.setPartial(text)
         }
         if let editor = engine as? OpenAIEditorEngine {
             // Semantic app commands ("copy the highlighted text") and the
@@ -450,7 +557,8 @@ final class DictationController: ObservableObject {
                 self?.stagePendingCommand(action)
             }
             editor.onReplacementPreview = { [weak self] preview in
-                self?.buffer.setReplacementPreview(preview)
+                guard let self, !self.inputOnHold else { return }
+                self.buffer.setReplacementPreview(preview)
             }
         }
         engine.onSegmentFinal = { [weak self, weak engine] text in
@@ -462,6 +570,12 @@ final class DictationController: ObservableObject {
             if engine?.replacesBuffer == true {
                 let (cleaned, commands) = VoiceCommands.extractEditorCommands(text)
                 DispatchQueue.main.async {
+                    // A countdown freezes the staged text: whatever was heard in
+                    // the meantime is dropped, wholesale-replacement included.
+                    guard self.pendingCommand == nil else {
+                        Log.write("segment dropped — command countdown active")
+                        return
+                    }
                     if !cleaned.isEmpty || commands.isEmpty {
                         self.buffer.replace(with: cleaned)
                     }
@@ -472,6 +586,10 @@ final class DictationController: ObservableObject {
                 return
             }
 
+            guard !self.inputOnHold else {
+                Log.write("segment dropped — command countdown active")
+                return
+            }
             let actions = VoiceCommands.parse(text, enabled: self.settings.voiceCommandsEnabled)
 
             if self.settings.jarvisAutoCleanup, JarvisEngine.isAvailable {
@@ -511,6 +629,11 @@ final class DictationController: ObservableObject {
         }
 
         phase = .listening
+        // When the microphone actually went live, which is not when the hotkey was
+        // pressed: a cloud engine spends half a second connecting first. Push-to-talk
+        // has to measure against this, or a release during the connect ends the
+        // session before a single sample was captured.
+        micLiveSince = Date()
         status = engine.isOnDevice ? "Listening — \(engine.displayName)" : "Listening — \(engine.displayName) (server)"
         Log.write("listening — engine=\(engine.displayName) on-device=\(engine.isOnDevice) input=\(Int(audio.inputFormat.sampleRate))Hz")
         showPanel?()
@@ -606,7 +729,11 @@ final class DictationController: ObservableObject {
         // being recognised — inserting it would commit words the user hasn't seen
         // settle, and "insert & send" would fire them off mid-sentence. It stays
         // staged for the next insert.
-        let text = buffer.committedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Spaces at either end are deliberate and are kept: a leading space is how
+        // you insert after a word that has none, a trailing one how you insert
+        // before. Only stray newlines are trimmed — one at the head or tail of a
+        // chat message is a Return keypress that sends it early.
+        let text = buffer.committedText.trimmingCharacters(in: .newlines)
         guard !text.isEmpty else {
             status = "Nothing to insert"
             // An empty ⌥↩ mid-dictation shouldn't kill the session either.

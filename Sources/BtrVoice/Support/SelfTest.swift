@@ -117,6 +117,65 @@ enum SelfTest {
             check("sanitize leaves clean text alone",
                   JarvisEngine.sanitize("already clean") == "already clean")
         }
+        do {
+            // Assistant chatter would otherwise be typed as if the user said it.
+            check("polish strips an acknowledgement preamble",
+                  JarvisEngine.sanitize("Sure, here's the edited text: meet me at six")
+                  == "meet me at six")
+            check("polish strips a first-person preamble",
+                  JarvisEngine.sanitize("I've updated the transcript: meet me at six")
+                  == "meet me at six")
+            check("polish strips a trailing offer of help",
+                  JarvisEngine.sanitize("meet me at six. Let me know if you'd like changes.")
+                  == "meet me at six.")
+            check("polish strips code fences",
+                  JarvisEngine.sanitize("```text meet me at six ```") == "meet me at six")
+            check("polish unwraps a fully quoted reply",
+                  JarvisEngine.sanitize("\"meet me at six\"") == "meet me at six")
+
+            // Conservative by design: dictated speech that merely resembles
+            // preamble must survive untouched.
+            check("polish keeps a dictated colon sentence",
+                  JarvisEngine.sanitize("shopping list: eggs and milk")
+                  == "shopping list: eggs and milk")
+            check("polish keeps a dictated Sure opener",
+                  JarvisEngine.sanitize("Sure, I'll be there at six")
+                  == "Sure, I'll be there at six")
+            check("polish keeps inner quotes",
+                  JarvisEngine.sanitize("he said \"yes\" and left")
+                  == "he said \"yes\" and left")
+            check("polish never strips the reply to nothing",
+                  JarvisEngine.sanitize("Here's the edited text:")
+                  == "Here's the edited text:")
+
+            // Regression: an offer-shaped phrase mid-sentence is the user's own
+            // speech and must survive. This once truncated dictation to its head.
+            check("polish keeps a dictated feel-free clause",
+                  JarvisEngine.sanitize("For BtrVoice, feel free to add a setting for this")
+                  == "For BtrVoice, feel free to add a setting for this")
+            check("polish keeps a dictated let-me-know clause",
+                  JarvisEngine.sanitize("Ask him and let me know if he agrees")
+                  == "Ask him and let me know if he agrees")
+            check("polish keeps a dictated would-you-like clause",
+                  JarvisEngine.sanitize("Tell me would you like me to come along")
+                  == "Tell me would you like me to come along")
+            check("polish still strips a sign-off after a full stop",
+                  JarvisEngine.sanitize("Meet me at six. Let me know if that works.")
+                  == "Meet me at six.")
+        }
+        do {
+            // Extras cost a ⌘C or expose the clipboard, so they are opt-in per
+            // utterance rather than gathered every time.
+            check("selection is requested by highlight wording",
+                  JarvisEngine.wants(.selection, in: "Jarvis, summarise what I highlighted"))
+            check("selection is requested by selected wording",
+                  JarvisEngine.wants(.selection, in: "Jarvis, translate the selected text"))
+            check("clipboard is requested by clipboard wording",
+                  JarvisEngine.wants(.clipboard, in: "Jarvis, paste in what's on my clipboard"))
+            check("a plain edit asks for neither",
+                  !JarvisEngine.wants(.selection, in: "Jarvis, make that more formal")
+                  && !JarvisEngine.wants(.clipboard, in: "Jarvis, make that more formal"))
+        }
 
         print("TextBuffer")
         do {

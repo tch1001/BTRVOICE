@@ -9,9 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables: Set<AnyCancellable> = []
 
     /// Press-and-hold tracking for ⌥Space, so a tap latches and a hold is momentary.
-    private var toggleKeyDownAt: CFAbsoluteTime?
+    /// How long counts as a hold lives on the controller, which is the only thing
+    /// that knows when the microphone actually went live.
     private var startedByCurrentPress = false
-    private let holdThreshold: CFTimeInterval = 0.35
 
     private static let welcomeShownKey = "welcomeShown"
 
@@ -76,16 +76,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case .toggleDictation:
             if isDown {
-                toggleKeyDownAt = CFAbsoluteTimeGetCurrent()
                 startedByCurrentPress = !controller.isListening
                 controller.toggleDictation()
             } else {
-                let held = CFAbsoluteTimeGetCurrent() - (toggleKeyDownAt ?? 0)
-                if startedByCurrentPress, held > holdThreshold, controller.isListening {
+                // Push-to-talk ends only when the *microphone* was live long enough
+                // to have heard something. Timing the keypress instead meant an
+                // ordinary tap — held past 0.35s while a cloud engine was still
+                // connecting — stopped the session before any audio was captured,
+                // which is why dictation appeared to start and immediately finish.
+                if startedByCurrentPress, controller.isListening, controller.holdHasCapturedAudio {
                     // Treated as push-to-talk. The buffer stays up for review.
                     controller.stopListening()
                 }
-                toggleKeyDownAt = nil
                 startedByCurrentPress = false
             }
 
