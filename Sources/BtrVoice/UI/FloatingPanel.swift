@@ -16,7 +16,7 @@ final class FloatingPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
-        contentMinSize = NSSize(width: 440, height: 230)
+        contentMinSize = NSSize(width: 320, height: 170)
 
         isFloatingPanel = true
         level = .floating

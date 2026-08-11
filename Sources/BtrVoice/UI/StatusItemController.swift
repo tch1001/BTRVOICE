@@ -183,6 +183,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         submenu.addItem(toggle("Stop listening after a pause", #selector(toggleStopOnSilence), settings.stopOnSilence))
         submenu.addItem(toggle("Clear buffer after inserting", #selector(toggleClearAfterCommit), settings.clearAfterCommit))
         submenu.addItem(toggle("Hide panel after inserting", #selector(toggleHideAfterCommit), settings.hideAfterCommit))
+        submenu.addItem(toggle("Bigger bottom left buttons", #selector(toggleBiggerBottomButtons), settings.biggerBottomButtons))
+        submenu.addItem(toggle("Show editor activity panel", #selector(toggleEditorActivity), settings.showEditorBrain))
 
         submenu.addItem(.separator())
         let engine = NSMenuItem(title: "Speech engine", action: nil, keyEquivalent: "")
@@ -258,6 +260,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleStopOnSilence() { settings.stopOnSilence.toggle() }
     @objc private func toggleClearAfterCommit() { settings.clearAfterCommit.toggle() }
     @objc private func toggleHideAfterCommit() { settings.hideAfterCommit.toggle() }
+    @objc private func toggleBiggerBottomButtons() { settings.biggerBottomButtons.toggle() }
+    @objc private func toggleEditorActivity() { settings.showEditorBrain.toggle() }
     @objc private func toggleJarvisAuto() { settings.jarvisAutoCleanup.toggle() }
 
     // MARK: - Keystroke timing diagnostic

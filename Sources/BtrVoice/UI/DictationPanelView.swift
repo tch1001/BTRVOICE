@@ -33,8 +33,12 @@ struct DictationPanelView: View {
             }
             Divider().opacity(0.5)
             footer
+            if settings.biggerBottomButtons {
+                Divider().opacity(0.5)
+                bigBottomBar
+            }
         }
-        .frame(minWidth: 440, maxWidth: .infinity, minHeight: 230, maxHeight: .infinity)
+        .frame(minWidth: 320, maxWidth: .infinity, minHeight: 170, maxHeight: .infinity)
         // Vibrancy alone leaves the transcript competing with the wallpaper, so the
         // material sits over a translucent window-coloured base for real contrast.
         .background {
@@ -347,6 +351,53 @@ struct DictationPanelView: View {
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+    }
+
+    /// Optional, oversized duplicates of the high-frequency controls. The compact
+    /// header/footer remain untouched; this row is an easier target when the panel is
+    /// parked at the bottom-left of a large external display.
+    private var bigBottomBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                controller.toggleDictation()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(isListening ? Color.red : Color.accentColor)
+                    Image(systemName: isListening ? "stop.fill" : "mic.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 58, height: 58)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isListening ? "Stop listening" : "Start listening")
+            .help(isListening ? "Stop listening (⌥Space)" : "Start listening (⌥Space)")
+
+            Button {
+                controller.commit(send: true)
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor)
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 58, height: 58)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(buffer.isEmpty)
+            .opacity(buffer.isEmpty ? 0.4 : 1)
+            .accessibilityLabel("Insert and send")
+            .help("Type the text, then press Return in the target app")
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
     }
 }
 

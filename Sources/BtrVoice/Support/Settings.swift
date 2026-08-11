@@ -99,6 +99,13 @@ final class Settings: ObservableObject {
     @Published var showEditorBrain: Bool { didSet { store.set(showEditorBrain, forKey: Key.showEditorBrain) } }
     @Published var editorBrainWidth: Double { didSet { store.set(editorBrainWidth, forKey: Key.editorBrainWidth) } }
 
+    /// A second row with large, round Voice and Insert & Send targets, pinned to the
+    /// bottom of the panel. For an external-monitor setup where the panel
+    /// lives at the bottom-left by the Dock and a resting left hand can hit big targets
+    /// without aiming. The normal header/footer controls stay exactly as they were; this
+    /// only adds.
+    @Published var biggerBottomButtons: Bool { didSet { store.set(biggerBottomButtons, forKey: Key.biggerBottomButtons) } }
+
     /// Drag limits for the brain column, so it can't crush the transcript or
     /// swallow the panel.
     static let editorBrainWidthRange: ClosedRange<Double> = 160...480
@@ -120,6 +127,7 @@ final class Settings: ObservableObject {
         static let jarvisBackend = "jarvisBackend"
         static let showEditorBrain = "showEditorBrain"
         static let editorBrainWidth = "editorBrainWidth"
+        static let biggerBottomButtons = "biggerBottomButtons"
     }
 
     private init() {
@@ -145,6 +153,9 @@ final class Settings: ObservableObject {
             Key.jarvisBackend: JarvisBackend.onDevice.rawValue,
             Key.showEditorBrain: true,
             Key.editorBrainWidth: 250.0,
+            // On by default: the user asked for this as their standing layout for the
+            // external-monitor / left-hand-by-the-Dock setup.
+            Key.biggerBottomButtons: true,
         ])
 
         onDeviceOnly = store.bool(forKey: Key.onDeviceOnly)
@@ -162,6 +173,7 @@ final class Settings: ObservableObject {
         jarvisAutoCleanup = store.bool(forKey: Key.jarvisAutoCleanup)
         jarvisBackend = JarvisBackend(rawValue: store.string(forKey: Key.jarvisBackend) ?? "") ?? .onDevice
         showEditorBrain = store.bool(forKey: Key.showEditorBrain)
+        biggerBottomButtons = store.bool(forKey: Key.biggerBottomButtons)
         editorBrainWidth = min(
             max(store.double(forKey: Key.editorBrainWidth), Self.editorBrainWidthRange.lowerBound),
             Self.editorBrainWidthRange.upperBound
