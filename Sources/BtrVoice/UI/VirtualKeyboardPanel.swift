@@ -213,6 +213,17 @@ struct VirtualKeyboardView: View {
 
 // MARK: - Panel
 
+/// A keyboard that never takes focus. Overriding `canBecomeKey` to false is the whole
+/// trick: a plain panel becomes the key window the instant you click a control in it,
+/// and then the keystrokes this thing injects land on *itself* — a window with no text
+/// field — which is the system beep the user heard, not typing. As a palette that can
+/// never be key, clicks still reach its buttons but focus stays on the app underneath,
+/// which is exactly where the injected keys should go.
+private final class KeyboardPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 /// Owns the keyboard panel so the menu can toggle it.
 @MainActor
 final class VirtualKeyboardController {
@@ -237,17 +248,21 @@ final class VirtualKeyboardController {
         let hosting = NSHostingController(rootView: VirtualKeyboardView(model: VirtualKeyboardModel()))
 
         // Titled so it can be dragged and closed natively, but non-activating and
-        // never key: clicking a key must leave focus exactly where it is. The
-        // window level and space behaviour mirror the dictation panel — always on
-        // top, present on every desktop, never listed in the window switcher.
-        let panel = NSPanel(contentViewController: hosting)
+        // never key (see KeyboardPanel): clicking a key must leave focus exactly where
+        // it is. The window level and space behaviour mirror the dictation panel —
+        // always on top, present on every desktop, never listed in the window switcher.
+        let panel = KeyboardPanel(contentViewController: hosting)
         panel.styleMask = [.titled, .closable, .utilityWindow, .nonactivatingPanel]
         panel.title = "Keyboard"
         panel.becomesKeyOnlyIfNeeded = true
         panel.isFloatingPanel = true
-        panel.level = .floating
+        // The level the real Accessibility Keyboard uses. `.floating` sits *below*
+        // Launchpad and Mission Control, so the keyboard would vanish under them; the
+        // assistive-tech-high level floats above even those, which is what lets it drive
+        // Launchpad's app search. `stationaryMoves` keeps it put when Spaces change.
+        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.assistiveTechHighWindow)))
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isExcludedFromWindowsMenu = true
         panel.isReleasedWhenClosed = false
 
