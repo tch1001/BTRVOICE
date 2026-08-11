@@ -45,6 +45,17 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     private var cancelled = false
     private var preRoll: [Data] = []
     private var pendingReply = ""
+    /// Every transcript callback is tagged with the clear-generation that heard it.
+    /// Clearing advances the generation, so callbacks already queued on the main
+    /// thread and a cancelled response that finishes late can no longer repopulate
+    /// the buffer.
+    private var discardGeneration = 0
+    private var activeResponseGeneration: Int?
+    private var inputGenerations: [String: Int] = [:]
+    private var pendingResponseGeneration: Int?
+    /// Covers the narrow race where the server has started a response but its
+    /// `response.created` event has not reached us when the user clicks Trash.
+    private var suppressUnboundEventsUntil = Date.distantPast
     /// Raw speech-to-text of what the user is saying right now, for feedback
     /// while they talk (the polished rewrite only starts once they pause).
     private var rawPartial = ""
@@ -96,11 +107,29 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     func rotate() { /* the editor has no segment cliff */ }
 
     func discardUtterance() {
-        // The user emptied the buffer — tell the editor its transcript is gone.
+        lock.lock()
+        let responseInFlight = activeResponseGeneration != nil
+        discardGeneration += 1
+        suppressUnboundEventsUntil = Date().addingTimeInterval(1.0)
+        pendingReply = ""
+        rawPartial = ""
+        lastTranscript = ""
+        lock.unlock()
+
+        // Stop every source that could resurrect the transcript: a response already
+        // generating, audio the server has buffered but not committed, our local
+        // fallback seed, and UI callbacks that were queued before this clear.
+        if responseInFlight { send(["type": "response.cancel"]) }
+        send(["type": "input_audio_buffer.clear"])
         send(["type": "conversation.item.create", "item": [
             "type": "message", "role": "system",
             "content": [["type": "input_text", "text": "The user cleared the transcript. It is now empty. Start fresh from their next speech."]],
         ]])
+        DispatchQueue.main.async { [weak self] in
+            self?.rescueTimer?.invalidate()
+            self?.onReplacementPreview?(nil)
+            self?.onPartial?("")
+        }
     }
 
     func finish() {
@@ -165,36 +194,59 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             // Live feedback while the user is still speaking: raw recognition
             // of their words, shown as the grey in-flight tail.
             lock.lock()
+            let generation = generationForInputEventLocked(event)
+            guard generation == discardGeneration else { lock.unlock(); return }
             rawPartial += (event["delta"] as? String) ?? ""
             let partial = rawPartial
             lock.unlock()
-            emit { self.onPartial?(partial) }
+            emitTranscript(for: generation) { self.onPartial?(partial) }
 
         case "conversation.item.input_audio_transcription.completed":
             lock.lock()
+            let generation = generationForInputEventLocked(event)
+            if let itemID = event["item_id"] as? String { inputGenerations.removeValue(forKey: itemID) }
+            guard generation == discardGeneration else { lock.unlock(); return }
             rawPartial = ((event["transcript"] as? String) ?? rawPartial)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let partial = rawPartial
             lock.unlock()
             if !partial.isEmpty { EditorActivityLog.post(.heard, "“\(partial)”") }
-            emit {
+            emitTranscript(for: generation) {
                 self.onPartial?(partial)
                 self.armRescue()
             }
 
         case "input_audio_buffer.speech_started":
-            EditorActivityLog.post(.info, "Speech detected — listening to the turn")
+            lock.lock()
+            let generation = generationForUnboundEventLocked()
+            if let itemID = event["item_id"] as? String { inputGenerations[itemID] = generation }
+            let current = generation == discardGeneration
+            lock.unlock()
+            if current { EditorActivityLog.post(.info, "Speech detected — listening to the turn") }
 
         case "input_audio_buffer.speech_stopped":
-            EditorActivityLog.post(.info, "Turn ended — editor is deciding what the transcript should say")
+            lock.lock()
+            let generation = generationForInputEventLocked(event)
+            pendingResponseGeneration = generation
+            let current = generation == discardGeneration
+            lock.unlock()
+            if current { EditorActivityLog.post(.info, "Turn ended — editor is deciding what the transcript should say") }
+
+        case "response.created":
+            lock.lock()
+            activeResponseGeneration = pendingResponseGeneration ?? generationForUnboundEventLocked()
+            pendingResponseGeneration = nil
+            lock.unlock()
 
         case "response.output_text.delta", "response.text.delta":
             lock.lock()
+            let generation = activeResponseGeneration ?? generationForUnboundEventLocked()
+            guard generation == discardGeneration else { lock.unlock(); return }
             pendingReply += (event["delta"] as? String) ?? ""
             let preview = pendingReply
             lock.unlock()
             // Stream the rewrite as it's generated instead of popping at the end.
-            emit { self.onReplacementPreview?(preview) }
+            emitTranscript(for: generation) { self.onReplacementPreview?(preview) }
 
         case "response.done":
             handleResponseDone(event)
@@ -314,23 +366,34 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
 
     private func handleResponseDone(_ event: [String: Any]) {
         lock.lock()
+        let responseGeneration = activeResponseGeneration ?? generationForUnboundEventLocked()
+        activeResponseGeneration = nil
         var transcript = pendingReply
         pendingReply = ""
         let speech = rawPartial.trimmingCharacters(in: .whitespacesAndNewlines)
         rawPartial = ""
+        let previousTranscript = lastTranscript
         let stillFinishing = finishing
+        let currentGeneration = discardGeneration
         lock.unlock()
+
+        guard responseGeneration == currentGeneration else {
+            Log.write("gpt-editor: dropped response from cleared voice context")
+            if stillFinishing { completeFinish() }
+            return
+        }
 
         // The editor may have called a tool instead of (or besides) producing
         // transcript text.
         var calledTool = false
+        var functionCalls: [[String: Any]] = []
         if let response = event["response"] as? [String: Any],
            let output = response["output"] as? [[String: Any]] {
             for item in output {
                 switch item["type"] as? String {
                 case "function_call":
                     calledTool = true
-                    handleFunctionCall(item)
+                    functionCalls.append(item)
                 default:
                     if transcript.isEmpty {
                         for content in (item["content"] as? [[String: Any]]) ?? [] {
@@ -348,13 +411,26 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             // spoke. Without this the recognised text would sit grey forever —
             // never confirmed, never insertable. Fall back to the raw speech,
             // appended to what the transcript already held.
-            cleaned = joined(lastTranscript, speech)
+            cleaned = joined(previousTranscript, speech)
             EditorActivityLog.post(.info, "Editor returned nothing — keeping the recognised words as-is")
         } else if !calledTool {
             EditorActivityLog.post(.info, "Editor responded with no transcript change")
         }
-        if !cleaned.isEmpty { lastTranscript = cleaned }
-        emit {
+
+        // Trash may have been clicked while the response was being parsed. Re-check
+        // before executing tools, updating the fallback base, or queueing UI work.
+        guard generationIsCurrent(responseGeneration) else {
+            Log.write("gpt-editor: dropped parsed response after voice context was cleared")
+            if stillFinishing { completeFinish() }
+            return
+        }
+        for item in functionCalls { handleFunctionCall(item) }
+        if !cleaned.isEmpty {
+            lock.lock()
+            if responseGeneration == discardGeneration { lastTranscript = cleaned }
+            lock.unlock()
+        }
+        emitTranscript(for: responseGeneration) {
             self.rescueTimer?.invalidate()
             self.onReplacementPreview?(nil)
             // Any grey tail has been folded into the confirmed text (or was
@@ -388,16 +464,22 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
 
     private func rescueOrphanedPartial() {
         lock.lock()
+        let generation = discardGeneration
         let speech = rawPartial.trimmingCharacters(in: .whitespacesAndNewlines)
         let quiet = pendingReply.isEmpty
         if !speech.isEmpty, quiet { rawPartial = "" }
+        let previousTranscript = lastTranscript
         lock.unlock()
         guard !speech.isEmpty, quiet else { return }
-        let rescued = joined(lastTranscript, speech)
+        guard generationIsCurrent(generation) else { return }
+        let rescued = joined(previousTranscript, speech)
+        lock.lock()
+        guard generation == discardGeneration else { lock.unlock(); return }
         lastTranscript = rescued
+        lock.unlock()
         Log.write("gpt-editor: rescued orphaned partial — \(speech)")
         EditorActivityLog.post(.info, "No response arrived — kept the recognised words")
-        emit {
+        emitTranscript(for: generation) {
             self.onPartial?("")
             self.onSegmentFinal?(rescued)
         }
@@ -584,6 +666,34 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
 
     private func emit(_ block: @escaping () -> Void) {
         DispatchQueue.main.async(execute: block)
+    }
+
+    /// Unbound transcription/response events immediately after a clear can belong to
+    /// work the server had already started. Attribute that short race window to the
+    /// previous generation; normal events use the current one.
+    private func generationForUnboundEventLocked() -> Int {
+        Date() < suppressUnboundEventsUntil ? max(0, discardGeneration - 1) : discardGeneration
+    }
+
+    private func generationForInputEventLocked(_ event: [String: Any]) -> Int {
+        if let itemID = event["item_id"] as? String, let generation = inputGenerations[itemID] {
+            return generation
+        }
+        return generationForUnboundEventLocked()
+    }
+
+    private func generationIsCurrent(_ generation: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return generation == discardGeneration
+    }
+
+    /// Drops transcript mutations that were queued on the main thread before Trash
+    /// advanced the generation.
+    private func emitTranscript(for generation: Int, _ block: @escaping () -> Void) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.generationIsCurrent(generation) else { return }
+            block()
+        }
     }
 
     // MARK: - Audio conversion
