@@ -6,6 +6,8 @@ import SwiftUI
 /// keeps its focus ring and its caret while dictation runs.
 final class FloatingPanel: NSPanel {
 
+    static let minimumContentSize = NSSize(width: 320, height: 170)
+
     var onCancel: (() -> Void)?
     var onUserDrag: (() -> Void)?
 
@@ -16,7 +18,8 @@ final class FloatingPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
-        contentMinSize = NSSize(width: 320, height: 170)
+        contentMinSize = Self.minimumContentSize
+        minSize = Self.minimumContentSize
 
         isFloatingPanel = true
         level = .floating
@@ -77,6 +80,18 @@ final class PanelController {
         panel.onUserDrag = { [weak self] in self?.autoPosition = false }
         // Remembers the size (and last origin) across launches.
         panel.setFrameAutosaveName("BtrVoicePanel")
+        // Frame autosave can restore a size written before the current resize floor,
+        // after the panel's initializer already applied its limits. Reassert them and
+        // repair an undersized saved frame so the controls never launch clipped.
+        let minimum = FloatingPanel.minimumContentSize
+        panel.contentMinSize = minimum
+        panel.minSize = minimum
+        if panel.frame.width < minimum.width || panel.frame.height < minimum.height {
+            var frame = panel.frame
+            frame.size.width = max(frame.width, minimum.width)
+            frame.size.height = max(frame.height, minimum.height)
+            panel.setFrame(frame, display: false)
+        }
 
         // Re-run placement when the frame changes under us — but never while the
         // user is dragging an edge, or we'd yank the window out of their hands.

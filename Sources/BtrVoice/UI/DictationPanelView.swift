@@ -38,7 +38,11 @@ struct DictationPanelView: View {
                 bigBottomBar
             }
         }
-        .frame(minWidth: 320, maxWidth: .infinity, minHeight: 170, maxHeight: .infinity)
+        // The AppKit panel owns the resize floor. Keeping a second SwiftUI min-width
+        // here makes the whole view remain wider than a narrowly restored window, so
+        // SwiftUI centres it behind the clip boundary and pushes the bottom-left
+        // controls off-screen. Always lay out at the window's real width instead.
+        .frame(maxWidth: .infinity, minHeight: 170, maxHeight: .infinity, alignment: .topLeading)
         // Vibrancy alone leaves the transcript competing with the wallpaper, so the
         // material sits over a translucent window-coloured base for real contrast.
         .background {
@@ -398,6 +402,7 @@ struct DictationPanelView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
