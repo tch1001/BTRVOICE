@@ -267,16 +267,32 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         keyLogLast = 0
         Log.write("keymon: ==== started (type normally for 60s) ====")
-        keyLogMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+        keyLogMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.keyDown, .keyUp, .flagsChanged]
+        ) { [weak self] event in
             guard let self else { return }
             let now = event.timestamp
             let gap = self.keyLogLast == 0 ? 0 : (now - self.keyLogLast) * 1000
             self.keyLogLast = now
-            let kind = event.type == .keyDown ? "down" : "up  "
+
+            let kind: String
+            switch event.type {
+            case .keyDown: kind = "down"
+            case .keyUp: kind = "up  "
+            default: kind = "mods"
+            }
+            var mods: [String] = []
+            let flags = event.modifierFlags
+            if flags.contains(.command) { mods.append("cmd") }
+            if flags.contains(.shift) { mods.append("shift") }
+            if flags.contains(.option) { mods.append("opt") }
+            if flags.contains(.control) { mods.append("ctrl") }
             let repeatFlag = event.type == .keyDown && event.isARepeat ? " AUTOREPEAT" : ""
+            // Which app the switcher landed on — the point of the ⌘Tab trace.
+            let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
             Log.write(String(
-                format: "keymon: %@ key=%3d gap=%6.1fms%@",
-                kind, event.keyCode, gap, repeatFlag
+                format: "keymon: %@ key=%3d gap=%6.1fms [%@] front=%@%@",
+                kind, event.keyCode, gap, mods.joined(separator: "+"), front, repeatFlag
             ))
         }
         keyLogStop = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { [weak self] _ in
