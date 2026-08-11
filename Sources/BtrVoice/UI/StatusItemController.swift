@@ -89,6 +89,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Voice Commands…", action: #selector(showVoiceCommandHelp)))
         menu.addItem(item("Diagnostics…", action: #selector(showDiagnostics)))
+        menu.addItem(item(
+            keyLogMonitor == nil ? "Log Keystroke Timing (60s)" : "Stop Keystroke Logging",
+            action: #selector(toggleKeyLogging)
+        ))
         menu.addItem(item("Open Log File", action: #selector(openLog)))
 
         menu.addItem(.separator())
@@ -244,6 +248,49 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleClearAfterCommit() { settings.clearAfterCommit.toggle() }
     @objc private func toggleHideAfterCommit() { settings.hideAfterCommit.toggle() }
     @objc private func toggleJarvisAuto() { settings.jarvisAutoCleanup.toggle() }
+
+    // MARK: - Keystroke timing diagnostic
+    //
+    // Repeated letters have two very different causes: the OS auto-repeating
+    // because a key-up arrived late (isARepeat = true, driven by system latency),
+    // or genuinely duplicated events (isARepeat = false — hardware chatter or an
+    // event tap re-injecting). Only the flag can tell them apart, so log it.
+
+    private var keyLogMonitor: Any?
+    private var keyLogStop: Timer?
+    private var keyLogLast: TimeInterval = 0
+
+    @objc private func toggleKeyLogging() {
+        if keyLogMonitor != nil {
+            stopKeyLogging()
+            return
+        }
+        keyLogLast = 0
+        Log.write("keymon: ==== started (type normally for 60s) ====")
+        keyLogMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            guard let self else { return }
+            let now = event.timestamp
+            let gap = self.keyLogLast == 0 ? 0 : (now - self.keyLogLast) * 1000
+            self.keyLogLast = now
+            let kind = event.type == .keyDown ? "down" : "up  "
+            let repeatFlag = event.type == .keyDown && event.isARepeat ? " AUTOREPEAT" : ""
+            Log.write(String(
+                format: "keymon: %@ key=%3d gap=%6.1fms%@",
+                kind, event.keyCode, gap, repeatFlag
+            ))
+        }
+        keyLogStop = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { [weak self] _ in
+            self?.stopKeyLogging()
+        }
+    }
+
+    private func stopKeyLogging() {
+        if let keyLogMonitor { NSEvent.removeMonitor(keyLogMonitor) }
+        keyLogMonitor = nil
+        keyLogStop?.invalidate()
+        keyLogStop = nil
+        Log.write("keymon: ==== stopped ====")
+    }
 
     @objc private func showJarvisNotes() {
         Task { @MainActor in JarvisNotesWindowController.shared.show() }
