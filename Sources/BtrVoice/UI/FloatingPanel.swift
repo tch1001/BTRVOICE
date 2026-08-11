@@ -8,8 +8,12 @@ final class FloatingPanel: NSPanel {
 
     static let minimumContentSize = NSSize(width: 320, height: 170)
 
+    private static let resizeCursorInset: CGFloat = 10
+
     var onCancel: (() -> Void)?
     var onUserDrag: (() -> Void)?
+
+    private var isShowingResizeCursor = false
 
     init() {
         super.init(
@@ -30,6 +34,7 @@ final class FloatingPanel: NSPanel {
         hasShadow = true
         hidesOnDeactivate = false
         isMovableByWindowBackground = true
+        acceptsMouseMovedEvents = true
         animationBehavior = .utilityWindow
         // Only steal keyboard focus when the user actually clicks into the editor.
         becomesKeyOnlyIfNeeded = true
@@ -47,6 +52,70 @@ final class FloatingPanel: NSPanel {
     override func performDrag(with event: NSEvent) {
         onUserDrag?()
         super.performDrag(with: event)
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        super.sendEvent(event)
+
+        switch event.type {
+        case .mouseMoved, .cursorUpdate:
+            updateResizeCursor(at: event.locationInWindow)
+        default:
+            break
+        }
+    }
+
+    private func updateResizeCursor(at point: NSPoint) {
+        guard styleMask.contains(.resizable) else {
+            restoreArrowCursorIfNeeded()
+            return
+        }
+
+        let bounds = NSRect(origin: .zero, size: frame.size)
+        guard bounds.contains(point) else {
+            restoreArrowCursorIfNeeded()
+            return
+        }
+
+        let nearLeft = point.x <= Self.resizeCursorInset
+        let nearRight = point.x >= bounds.width - Self.resizeCursorInset
+        let nearBottom = point.y <= Self.resizeCursorInset
+        let nearTop = point.y >= bounds.height - Self.resizeCursorInset
+
+        let position: NSCursor.FrameResizePosition?
+        switch (nearLeft, nearRight, nearBottom, nearTop) {
+        case (true, _, _, true):
+            position = .topLeft
+        case (_, true, _, true):
+            position = .topRight
+        case (true, _, true, _):
+            position = .bottomLeft
+        case (_, true, true, _):
+            position = .bottomRight
+        case (true, _, _, _):
+            position = .left
+        case (_, true, _, _):
+            position = .right
+        case (_, _, true, _):
+            position = .bottom
+        case (_, _, _, true):
+            position = .top
+        default:
+            position = nil
+        }
+
+        if let position {
+            NSCursor.frameResize(position: position, directions: .all).set()
+            isShowingResizeCursor = true
+        } else {
+            restoreArrowCursorIfNeeded()
+        }
+    }
+
+    private func restoreArrowCursorIfNeeded() {
+        guard isShowingResizeCursor else { return }
+        NSCursor.arrow.set()
+        isShowingResizeCursor = false
     }
 }
 
