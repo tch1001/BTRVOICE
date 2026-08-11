@@ -224,7 +224,7 @@ struct DictationPanelView: View {
                 Text(pending.label)
                     .font(.system(size: 13, weight: .semibold))
                     .multilineTextAlignment(.center)
-                Text(timerInterval: Date()...pending.firesAt, countsDown: true)
+                Text(timerInterval: min(Date(), pending.firesAt)...pending.firesAt, countsDown: true)
                     .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(.secondary)
             }
