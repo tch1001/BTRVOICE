@@ -44,6 +44,9 @@ enum SelfTest {
             check("do click clicks", VoiceCommands.parse("do click", enabled: true) == [.clickAtPointer])
             check("do insert commits", VoiceCommands.parse("do insert", enabled: true) == [.commit])
             check("do send it inserts and sends", VoiceCommands.parse("do send it", enabled: true) == [.commitAndSend])
+            check("insert waits for finalized buffer", BufferAction.commit.requiresFinalizedBuffer)
+            check("send waits for finalized buffer", BufferAction.commitAndSend.requiresFinalizedBuffer)
+            check("non-insert command does not wait for buffer", !BufferAction.pasteInTarget.requiresFinalizedBuffer)
         }
         do {
             let (text, actions) = VoiceCommands.extractEditorCommands("hello world [[cmd:send]]")
@@ -266,6 +269,25 @@ enum SelfTest {
             buffer.flushPartial()
             check("flushPartial is a no-op when there is no partial",
                   buffer.committedText == "Already committed. still in flight")
+        }
+        do {
+            let buffer = TextBuffer()
+            buffer.setPartial("visible unfinished words")
+            buffer.finalizePendingRecognition()
+            check("commit fallback promotes visible partial",
+                  buffer.committedText == "visible unfinished words" && buffer.partial.isEmpty,
+                  buffer.displayText)
+        }
+        do {
+            let buffer = TextBuffer()
+            buffer.setPartial("raw speech")
+            buffer.setReplacementPreview("the editor's finished rewrite")
+            buffer.finalizePendingRecognition()
+            check("commit fallback prefers editor preview",
+                  buffer.committedText == "the editor's finished rewrite"
+                      && buffer.partial.isEmpty
+                      && buffer.replacementPreview == nil,
+                  buffer.displayText)
         }
         do {
             let buffer = TextBuffer()

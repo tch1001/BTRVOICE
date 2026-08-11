@@ -479,10 +479,8 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.unlock()
         Log.write("gpt-editor: rescued orphaned partial — \(speech)")
         EditorActivityLog.post(.info, "No response arrived — kept the recognised words")
-        emitTranscript(for: generation) {
-            self.onPartial?("")
-            self.onSegmentFinal?(rescued)
-        }
+        onPartial?("")
+        onSegmentFinal?(rescued)
     }
 
     private func handleErrorEvent(_ event: [String: Any], raw text: String) {
@@ -626,8 +624,6 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     }
 
     private func completeFinish() {
-        // Recognised-but-unanswered speech would die with the session; keep it.
-        DispatchQueue.main.async { self.rescueOrphanedPartial() }
         lock.lock()
         let alreadyCancelled = cancelled
         cancelled = true
@@ -637,6 +633,10 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         if !alreadyCancelled {
             emit {
                 self.rescueTimer?.invalidate()
+                // Deliver any rescued transcript synchronously on the main queue
+                // before announcing completion. The controller is allowed to read
+                // and commit the buffer as soon as onFinished returns.
+                self.rescueOrphanedPartial()
                 self.onFinished?()
             }
         }

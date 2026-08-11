@@ -177,6 +177,41 @@ final class DictationController: ObservableObject {
         }
     }
 
+    /// Sends a key from the on-screen keyboard to the user's app, never to one of
+    /// BtrVoice's own panels. The keyboard panel itself cannot become key, but the
+    /// dictation panel or status-menu interaction may already have left BtrVoice
+    /// frontmost; relying on ambient focus in that state produces the system beep.
+    func pressVirtualKeyboardKey(_ code: CGKeyCode, flags: CGEventFlags) {
+        guard Permissions.accessibilityGranted else { return }
+
+        releaseFocus?()
+
+        let inject = {
+            TextInjector.pressCombo(key: code, flags: flags) { result in
+                if case .failure(let error) = result {
+                    Log.write("keyboard: key injection failed — \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // Preserve whatever external surface is genuinely current (including
+        // Launchpad). Only reactivate the remembered target when BtrVoice itself is
+        // frontmost after a panel or status-menu interaction.
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            inject()
+            return
+        }
+
+        targets.focusTarget { focused in
+            if !focused {
+                Log.write("keyboard: could not restore external target; key suppressed")
+                return
+            }
+            inject()
+        }
+    }
+
     func copyBufferToPasteboard() {
         // What you see is what you copy, live tail included.
         let text = buffer.displayText
@@ -400,7 +435,10 @@ final class DictationController: ObservableObject {
             label: label,
             firesAt: Date().addingTimeInterval(Self.pendingCommandGrace)
         )
-        setInputHold(true)
+        // Insert/send must keep accepting the editor's final rewrite while the
+        // confirmation countdown is visible. Other app commands still freeze the
+        // staged text so speech during their countdown cannot mutate the buffer.
+        setInputHold(!action.requiresFinalizedBuffer)
         showPanel?()
         pendingCommandTimer = Timer.scheduledTimer(
             withTimeInterval: Self.pendingCommandGrace, repeats: false
@@ -416,11 +454,6 @@ final class DictationController: ObservableObject {
         guard let pending = pendingCommand else { return }
         pendingCommand = nil
         setInputHold(false)
-        // Anything spoken during the countdown was dropped from the buffer;
-        // also mark it stale in the engine so a final result landing after the
-        // commit can't push held-back text into the freshly cleared buffer.
-        if case .commit = pending.action { engine?.discardUtterance() }
-        if case .commitAndSend = pending.action { engine?.discardUtterance() }
         perform(pending.action)
     }
 
@@ -569,10 +602,12 @@ final class DictationController: ObservableObject {
             // markers the editor was instructed to emit instead of prose.
             if engine?.replacesBuffer == true {
                 let (cleaned, commands) = VoiceCommands.extractEditorCommands(text)
-                DispatchQueue.main.async {
-                    // A countdown freezes the staged text: whatever was heard in
-                    // the meantime is dropped, wholesale-replacement included.
-                    guard self.pendingCommand == nil else {
+                let applyFinalEditorSegment = {
+                    // Most command countdowns freeze the staged text. Insert/send
+                    // are different: their entire purpose is to consume the final
+                    // buffer, so the editor's last rewrite must still land.
+                    if let pending = self.pendingCommand,
+                       !pending.action.requiresFinalizedBuffer {
                         Log.write("segment dropped — command countdown active")
                         return
                     }
@@ -582,6 +617,14 @@ final class DictationController: ObservableObject {
                     if let command = commands.first {
                         self.stagePendingCommand(command)
                     }
+                }
+                // Editor callbacks already arrive on main. Applying immediately is
+                // essential: onFinished may follow as soon as this callback returns,
+                // and a second async hop would let it snapshot the old/empty buffer.
+                if Thread.isMainThread {
+                    applyFinalEditorSegment()
+                } else {
+                    DispatchQueue.main.async(execute: applyFinalEditorSegment)
                 }
                 return
             }
@@ -644,7 +687,26 @@ final class DictationController: ObservableObject {
     private func handleRecognitionFinished() {
         retireEngine(cancelling: false)
         guard phase == .finishing else { return }
+
+        // Auto-cleanup is part of recognition finalization too. Do not snapshot the
+        // buffer while its last asynchronous cleanup is still outstanding.
+        if let jarvisChain {
+            status = "Finishing text…"
+            Task { @MainActor [weak self] in
+                await jarvisChain.value
+                self?.completeRecognitionFinished()
+            }
+            return
+        }
+        completeRecognitionFinished()
+    }
+
+    private func completeRecognitionFinished() {
+        guard phase == .finishing else { return }
         phase = .idle
+        // Defensive backend fallback: anything the user can still see as a preview
+        // or grey tail belongs in the commit, never in a later/empty snapshot.
+        buffer.finalizePendingRecognition()
         status = buffer.isEmpty ? "" : "Ready — ⌥↩ to insert"
 
         if let pending = pendingCommit {
@@ -662,9 +724,9 @@ final class DictationController: ObservableObject {
             self.pendingCommit = nil
             self.retireEngine(cancelling: true)
             if self.phase == .finishing { self.phase = .idle }
-            // The recogniser never delivered its final; the words on screen are still
-            // owed to the user, so promote the partial rather than dropping it.
-            self.buffer.flushPartial()
+            // The recogniser never delivered its final; the words on screen are
+            // still owed to the user, including an editor replacement preview.
+            self.buffer.finalizePendingRecognition()
             self.performCommit(send: pending.send)
         }
     }

@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.onTogglePanel = { [weak self] in
             self?.panels.toggle(reposition: Settings.shared.followCaret)
         }
+        statusItem.onResetPanelPosition = { [weak self] in
+            self?.panels.resetPosition()
+        }
 
         controller.showPanel = { [weak self] in
             self?.panels.show(reposition: false)
@@ -37,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.releaseFocus = { [weak self] in
             self?.panels.releaseFocus()
+        }
+        VirtualKeyboardController.shared.configureKeyHandler { [weak self] code, flags in
+            self?.controller.pressVirtualKeyboardKey(code, flags: flags)
         }
 
         // Handy when iterating on the panel's layout without talking to it.
@@ -67,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        panels?.persistFrameNow()
         HotkeyManager.shared.unregister()
     }
 

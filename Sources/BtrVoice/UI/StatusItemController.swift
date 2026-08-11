@@ -12,6 +12,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var cancellables: Set<AnyCancellable> = []
 
     var onTogglePanel: (() -> Void)?
+    var onResetPanelPosition: (() -> Void)?
 
     init(controller: DictationController) {
         self.controller = controller
@@ -74,6 +75,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(jarvisItem())
         menu.addItem(settingsItem())
+        menu.addItem(item("Reset BtrVoice Position", action: #selector(resetBtrVoicePosition)))
 
         let missing = Permissions.missing
         if !missing.isEmpty {
@@ -251,6 +253,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func toggleVirtualKeyboard() {
         DispatchQueue.main.async { VirtualKeyboardController.shared.toggle() }
+    }
+
+    @objc private func resetBtrVoicePosition() {
+        onResetPanelPosition?()
     }
 
     @objc private func toggleOnDevice() { settings.onDeviceOnly.toggle() }

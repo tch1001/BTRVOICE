@@ -24,25 +24,33 @@ struct DictationPanelView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider().opacity(0.5)
-            transcript
-            if let error = controller.errorMessage {
-                errorBanner(error)
-            }
-            Divider().opacity(0.5)
-            footer
-            if settings.biggerBottomButtons {
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 0) {
+                header
                 Divider().opacity(0.5)
-                bigBottomBar
+                transcript
+                if let error = controller.errorMessage {
+                    errorBanner(error)
+                }
+                Divider().opacity(0.5)
+                footer
+                if settings.biggerBottomButtons {
+                    Divider().opacity(0.5)
+                    bigBottomBar
+                }
             }
+            // Several compact footer controls have fixed ideal widths. At a narrow
+            // window they can overflow, but they must not make the *entire* stack
+            // wider and centre it behind the panel's clip boundary. Pin the root
+            // stack to the AppKit content width so the large bottom buttons retain
+            // their leading inset and stay fully clickable.
+            .frame(
+                width: geometry.size.width,
+                height: geometry.size.height,
+                alignment: .topLeading
+            )
         }
-        // The AppKit panel owns the resize floor. Keeping a second SwiftUI min-width
-        // here makes the whole view remain wider than a narrowly restored window, so
-        // SwiftUI centres it behind the clip boundary and pushes the bottom-left
-        // controls off-screen. Always lay out at the window's real width instead.
-        .frame(maxWidth: .infinity, minHeight: 170, maxHeight: .infinity, alignment: .topLeading)
+        .frame(minHeight: 170)
         // Vibrancy alone leaves the transcript competing with the wallpaper, so the
         // material sits over a translucent window-coloured base for real contrast.
         .background {

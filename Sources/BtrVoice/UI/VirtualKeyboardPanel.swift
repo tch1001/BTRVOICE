@@ -29,6 +29,12 @@ final class VirtualKeyboardModel: ObservableObject {
     @Published var option: Latch = .off
     @Published var command: Latch = .off
 
+    private let keyHandler: (CGKeyCode, CGEventFlags) -> Void
+
+    init(keyHandler: @escaping (CGKeyCode, CGEventFlags) -> Void) {
+        self.keyHandler = keyHandler
+    }
+
     var shifted: Bool { shift != .off }
 
     func toggle(_ keyPath: ReferenceWritableKeyPath<VirtualKeyboardModel, Latch>) {
@@ -51,7 +57,7 @@ final class VirtualKeyboardModel: ObservableObject {
         if option != .off { flags.insert(.maskAlternate) }
         if command != .off { flags.insert(.maskCommand) }
 
-        TextInjector.pressCombo(key: code, flags: flags) { _ in }
+        keyHandler(code, flags)
 
         if shift == .once { shift = .off }
         if control == .once { control = .off }
@@ -229,8 +235,13 @@ private final class KeyboardPanel: NSPanel {
 final class VirtualKeyboardController {
     static let shared = VirtualKeyboardController()
     private var panel: NSPanel?
+    private var keyHandler: ((CGKeyCode, CGEventFlags) -> Void)?
 
     var isVisible: Bool { panel?.isVisible ?? false }
+
+    func configureKeyHandler(_ handler: @escaping (CGKeyCode, CGEventFlags) -> Void) {
+        keyHandler = handler
+    }
 
     func toggle() {
         if let panel, panel.isVisible {
@@ -245,7 +256,14 @@ final class VirtualKeyboardController {
             panel.orderFrontRegardless()
             return
         }
-        let hosting = NSHostingController(rootView: VirtualKeyboardView(model: VirtualKeyboardModel()))
+        let model = VirtualKeyboardModel { [weak self] code, flags in
+            guard let handler = self?.keyHandler else {
+                Log.write("keyboard: key suppressed because no target handler is configured")
+                return
+            }
+            handler(code, flags)
+        }
+        let hosting = NSHostingController(rootView: VirtualKeyboardView(model: model))
 
         // Titled so it can be dragged and closed natively, but non-activating and
         // never key (see KeyboardPanel): clicking a key must leave focus exactly where

@@ -113,6 +113,24 @@ final class TextBuffer: ObservableObject {
         revision += 1
     }
 
+    /// Makes the latest visible recognition safe to commit. Editor mode streams a
+    /// complete replacement preview; other engines expose an additive partial tail.
+    /// Normally an engine final clears both before completion, but this preserves
+    /// the user's words if a backend finishes without delivering that last callback.
+    func finalizePendingRecognition() {
+        if let preview = replacementPreview?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !preview.isEmpty {
+            pushUndo()
+            text = preview
+            partial = ""
+            replacementPreview = nil
+            revision += 1
+            return
+        }
+        replacementPreview = nil
+        flushPartial()
+    }
+
     func replace(with value: String) {
         pushUndo()
         text = value

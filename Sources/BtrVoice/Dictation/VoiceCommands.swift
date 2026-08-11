@@ -20,6 +20,17 @@ enum BufferAction: Equatable {
     case jarvis(String)
     /// GPT Editor: press an arbitrary chord ("cmd+shift+p") in the target app.
     case pressKeys(String)
+
+    /// Insert actions consume the transcript, so they must allow recognition to
+    /// finish instead of freezing or discarding the in-flight utterance.
+    var requiresFinalizedBuffer: Bool {
+        switch self {
+        case .commit, .commitAndSend:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 /// Turns spoken control phrases into buffer actions, so the user never has to
