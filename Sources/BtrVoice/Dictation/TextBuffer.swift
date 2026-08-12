@@ -25,6 +25,12 @@ final class TextBuffer: ObservableObject {
     /// What would be typed if the user committed right now.
     var committedText: String { text }
 
+    /// Recognition that is still represented by the grey UI and therefore must
+    /// never satisfy a pending Insert/Send request.
+    var hasUnconfirmedText: Bool {
+        !partial.isEmpty || replacementPreview != nil
+    }
+
     /// Everything the user can see, live tail included.
     var displayText: String {
         partial.isEmpty ? text : joined(text, partial)
@@ -111,24 +117,6 @@ final class TextBuffer: ObservableObject {
         text = joined(text, trimmed)
         partial = ""
         revision += 1
-    }
-
-    /// Makes the latest visible recognition safe to commit. Editor mode streams a
-    /// complete replacement preview; other engines expose an additive partial tail.
-    /// Normally an engine final clears both before completion, but this preserves
-    /// the user's words if a backend finishes without delivering that last callback.
-    func finalizePendingRecognition() {
-        if let preview = replacementPreview?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !preview.isEmpty {
-            pushUndo()
-            text = preview
-            partial = ""
-            replacementPreview = nil
-            revision += 1
-            return
-        }
-        replacementPreview = nil
-        flushPartial()
     }
 
     func replace(with value: String) {

@@ -136,8 +136,6 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.lock()
         finishing = true
         lock.unlock()
-        // Don't strand recognised speech if the session ends before a response.
-        DispatchQueue.main.async { self.armRescue() }
         // Flush any trailing audio and ask for one last transcript pass.
         send(["type": "input_audio_buffer.commit"])
         send(["type": "response.create"])
@@ -496,7 +494,10 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.lock(); let benign = finishing || cancelled; lock.unlock()
         if benign {
             Log.write("gpt-editor: (finishing) \(message)")
-            if finishing { completeFinish() }
+            // Server VAD often committed the turn already, so our explicit audio
+            // commit can report an empty/too-small buffer while the editor's actual
+            // response is still in flight. Do not convert that error into an early
+            // raw-speech rescue; response.done or the finish watchdog owns closure.
         } else {
             reportError(EngineError.api(message))
         }
@@ -633,10 +634,9 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         if !alreadyCancelled {
             emit {
                 self.rescueTimer?.invalidate()
-                // Deliver any rescued transcript synchronously on the main queue
-                // before announcing completion. The controller is allowed to read
-                // and commit the buffer as soon as onFinished returns.
-                self.rescueOrphanedPartial()
+                // A finish timeout must not promote grey raw speech. Normal
+                // response.done processing has already emitted a final transcript;
+                // otherwise the controller keeps the unfinished text staged.
                 self.onFinished?()
             }
         }

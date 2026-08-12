@@ -254,6 +254,11 @@ enum SelfTest {
                   buffer.displayText == "Committed. in flight", buffer.displayText)
             check("committed text excludes the live partial",
                   buffer.committedText == "Committed.", buffer.committedText)
+            buffer.setReplacementPreview("unfinished editor rewrite")
+            check("committed text excludes the editor preview",
+                  buffer.committedText == "Committed.", buffer.committedText)
+            check("editor preview is unconfirmed", buffer.hasUnconfirmedText)
+            buffer.setReplacementPreview(nil)
             let escalated = buffer.apply([.pasteInTarget])
             check("commands are escalated to the controller", escalated == [.pasteInTarget], "\(escalated)")
             check("finalising clears the partial", buffer.partial.isEmpty)
@@ -298,25 +303,6 @@ enum SelfTest {
             buffer.flushPartial()
             check("flushPartial is a no-op when there is no partial",
                   buffer.committedText == "Already committed. still in flight")
-        }
-        do {
-            let buffer = TextBuffer()
-            buffer.setPartial("visible unfinished words")
-            buffer.finalizePendingRecognition()
-            check("commit fallback promotes visible partial",
-                  buffer.committedText == "visible unfinished words" && buffer.partial.isEmpty,
-                  buffer.displayText)
-        }
-        do {
-            let buffer = TextBuffer()
-            buffer.setPartial("raw speech")
-            buffer.setReplacementPreview("the editor's finished rewrite")
-            buffer.finalizePendingRecognition()
-            check("commit fallback prefers editor preview",
-                  buffer.committedText == "the editor's finished rewrite"
-                      && buffer.partial.isEmpty
-                      && buffer.replacementPreview == nil,
-                  buffer.displayText)
         }
         do {
             let buffer = TextBuffer()

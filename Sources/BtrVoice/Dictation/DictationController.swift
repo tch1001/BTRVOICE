@@ -45,6 +45,7 @@ final class DictationController: ObservableObject {
     /// The user hit Insert mid-dictation; go back to listening once the text is out.
     private var resumeAfterCommit = false
     private var pendingCommitDeadline: Timer?
+    private var renderedCommitWorkItem: DispatchWorkItem?
 
     var isListening: Bool { phase == .listening }
 
@@ -704,31 +705,54 @@ final class DictationController: ObservableObject {
     private func completeRecognitionFinished() {
         guard phase == .finishing else { return }
         phase = .idle
-        // Defensive backend fallback: anything the user can still see as a preview
-        // or grey tail belongs in the commit, never in a later/empty snapshot.
-        buffer.finalizePendingRecognition()
         status = buffer.isEmpty ? "" : "Ready — ⌥↩ to insert"
 
         if let pending = pendingCommit {
             pendingCommit = nil
             pendingCommitDeadline?.invalidate()
-            performCommit(send: pending.send)
+            guard !buffer.hasUnconfirmedText else {
+                resumeAfterCommit = false
+                status = "Text is still unfinished — kept staged and not sent"
+                Log.write("commit blocked: recognition finished with grey text still staged")
+                return
+            }
+            performCommitAfterRendering(send: pending.send)
         }
     }
 
     /// If the recogniser never reports completion we still owe the user their commit.
     private func armPendingCommitTimeout() {
         pendingCommitDeadline?.invalidate()
-        pendingCommitDeadline = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
+        // GPT Editor may still be producing its final rewrite after the audio-input
+        // commit reports a harmless empty-buffer error. Give that response longer
+        // than the engine's own five-second finish watchdog.
+        let timeout: TimeInterval = engine?.replacesBuffer == true ? 6.0 : 2.5
+        pendingCommitDeadline = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
             guard let self, let pending = self.pendingCommit else { return }
             self.pendingCommit = nil
             self.retireEngine(cancelling: true)
             if self.phase == .finishing { self.phase = .idle }
-            // The recogniser never delivered its final; the words on screen are
-            // still owed to the user, including an editor replacement preview.
-            self.buffer.finalizePendingRecognition()
-            self.performCommit(send: pending.send)
+            guard !self.buffer.hasUnconfirmedText else {
+                self.resumeAfterCommit = false
+                self.status = "Text is still unfinished — kept staged and not sent"
+                Log.write("commit blocked: recognition timed out with grey text still staged")
+                return
+            }
+            self.performCommitAfterRendering(send: pending.send)
         }
+    }
+
+    /// Final transcript callbacks and onFinished can arrive in adjacent main-queue
+    /// blocks. Let SwiftUI/AppKit paint the final text in its committed colour before
+    /// injecting it, so the visible UI never appears to send a grey preview.
+    private func performCommitAfterRendering(send: Bool) {
+        renderedCommitWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.phase == .idle else { return }
+            self.performCommit(send: send)
+        }
+        renderedCommitWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     /// Drops our reference to the engine, but hands the last one to the next
@@ -796,6 +820,11 @@ final class DictationController: ObservableObject {
         // before. Only stray newlines are trimmed — one at the head or tail of a
         // chat message is a Return keypress that sends it early.
         let text = buffer.committedText.trimmingCharacters(in: .newlines)
+        Log.write(
+            "commit boundary: committed=\((text as NSString).length) "
+            + "greyPartial=\((buffer.partial as NSString).length) "
+            + "greyPreview=\((buffer.replacementPreview as NSString?)?.length ?? 0)"
+        )
         guard !text.isEmpty else {
             status = "Nothing to insert"
             // An empty ⌥↩ mid-dictation shouldn't kill the session either.
