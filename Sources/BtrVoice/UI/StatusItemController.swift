@@ -351,12 +351,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
             let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !key.isEmpty { OpenAIKeyStore.write(key) }
+            if !key.isEmpty {
+                OpenAIKeyStore.write(key)
+                Task { @MainActor in JarvisVoiceService.shared.credentialsDidChange() }
+            }
         }
     }
 
     @objc private func clearOpenAIKey() {
         OpenAIKeyStore.clear()
+        Task { @MainActor in JarvisVoiceService.shared.credentialsDidChange() }
         if settings.jarvisBackend == .openAI { settings.jarvisBackend = .onDevice }
     }
 

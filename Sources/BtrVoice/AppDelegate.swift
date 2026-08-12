@@ -49,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_PANEL"] == "1" {
             panels.show(reposition: false)
         }
+        // Dev hook: open the embedded Realtime console without navigating the
+        // menu-bar item, so its packaged WebKit behavior can be smoke-tested.
+        if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_JARVIS"] == "1" {
+            DispatchQueue.main.async { JarvisSurfaceWindowController.shared.show() }
+        }
         // Dev hook: start a listening session immediately, so the engine pipeline can
         // be exercised headlessly.
         if ProcessInfo.processInfo.environment["BTRVOICE_AUTOSTART"] == "1" {
@@ -75,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         panels?.persistFrameNow()
         HotkeyManager.shared.unregister()
+        JarvisVoiceService.shared.shutdown()
     }
 
     // MARK: - Hotkeys

@@ -87,6 +87,35 @@ enum SelfTest {
 
         print("Jarvis")
         do {
+            let bundle = URL(fileURLWithPath: "/Users/example/btr_voice/build/BtrVoice.app")
+            let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+            let expected = "/Users/example/jarvis/plugins/jarvis/voice/__main__.py"
+            let plugins = JarvisVoiceInstallation.findPlugins(
+                environment: [:], bundleURL: bundle, homeDirectory: home,
+                fileExists: { $0 == expected }
+            )
+            check("Start Jarvis finds a sibling voice provider",
+                  plugins?.path == "/Users/example/jarvis/plugins", plugins?.path ?? "nil")
+
+            let configured = JarvisVoiceInstallation.findPlugins(
+                environment: ["JARVIS_PLUGIN_DIR": "/opt/jarvis/plugins"],
+                bundleURL: bundle, homeDirectory: home,
+                fileExists: { $0 == "/opt/jarvis/plugins/jarvis/voice/__main__.py" }
+            )
+            check("Start Jarvis honors an explicit plugin directory",
+                  configured?.path == "/opt/jarvis/plugins", configured?.path ?? "nil")
+        }
+        do {
+            let plugins = URL(fileURLWithPath: "/opt/jarvis/plugins", isDirectory: true)
+            let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+            let python = JarvisVoiceInstallation.findPython(
+                environment: [:], pluginsDirectory: plugins, homeDirectory: home,
+                isExecutable: { $0 == "/opt/jarvis/plugins/.venv/bin/python" }
+            )
+            check("Start Jarvis prefers its project Python",
+                  python?.path == "/opt/jarvis/plugins/.venv/bin/python", python?.path ?? "nil")
+        }
+        do {
             check("jarvis gets the whole utterance verbatim",
                   VoiceCommands.parse("Hey Jarvis, clean this up", enabled: true)
                   == [.jarvis("Hey Jarvis, clean this up")])
