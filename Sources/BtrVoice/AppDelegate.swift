@@ -49,8 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_PANEL"] == "1" {
             panels.show(reposition: false)
         }
-        // Dev hook: open the embedded Realtime console without navigating the
-        // menu-bar item, so its packaged WebKit behavior can be smoke-tested.
+        // Dev hook: open the native Realtime console without navigating the menu.
         if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_JARVIS"] == "1" {
             DispatchQueue.main.async { JarvisSurfaceWindowController.shared.show() }
         }

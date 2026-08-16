@@ -41,20 +41,33 @@ final class DictationController: ObservableObject {
     private struct PendingCommit {
         let send: Bool
     }
-    private var pendingCommit: PendingCommit?
+    @Published private var pendingCommit: PendingCommit?
     /// The user hit Insert mid-dictation; go back to listening once the text is out.
     private var resumeAfterCommit = false
     private var pendingCommitDeadline: Timer?
-    private var renderedCommitWorkItem: DispatchWorkItem?
 
     var isListening: Bool { phase == .listening }
+    var isCommitPending: Bool { pendingCommit != nil }
 
     // MARK: - Public control
 
     func toggleDictation() {
         switch phase {
-        case .listening, .finishing:
+        case .listening:
             stopListening()
+        case .finishing:
+            // The UI shows a microphone (not a stop icon) while finishing, so a
+            // click must start a fresh attempt. Previously it called stopListening,
+            // whose `.listening` guard made the control appear completely dead.
+            resumeAfterCommit = false
+            pendingCommit = nil
+            pendingCommitDeadline?.invalidate()
+            audio.stop()
+            stopPolicyTimer()
+            retireEngine(cancelling: true)
+            phase = .idle
+            status = ""
+            startListening()
         case .idle, .committing:
             startListening()
         }
@@ -90,6 +103,15 @@ final class DictationController: ObservableObject {
         }
     }
 
+    /// Core Audio cannot safely swap the device under a live recognition stream.
+    /// The persisted selection is applied on the next capture start; make that
+    /// explicit if the user changes Inputs while already dictating.
+    func inputSourceDidChange() {
+        if phase == .listening || phase == .finishing {
+            status = "Microphone changed — applies to the next listening session"
+        }
+    }
+
     /// Stops capture and flushes the recogniser. The buffer is kept for review.
     func stopListening() {
         guard phase == .listening else { return }
@@ -112,6 +134,7 @@ final class DictationController: ObservableObject {
             pendingCommit = PendingCommit(send: send)
             armPendingCommitTimeout()
             stopListening()
+            status = send ? "Finalizing & sending…" : "Finalizing & inserting…"
             return
         }
         performCommit(send: send)
@@ -592,6 +615,12 @@ final class DictationController: ObservableObject {
             }
             editor.onReplacementPreview = { [weak self] preview in
                 guard let self, !self.inputOnHold else { return }
+                // Once Insert/Send has been requested, the editor still completes
+                // its final rewrite internally, but repainting that entire rewrite
+                // token-by-token in grey only makes the commit look slow. Freeze the
+                // last visible preview; response.done applies the confirmed text in
+                // one step immediately before the pending commit consumes it.
+                guard preview == nil || self.pendingCommit == nil else { return }
                 self.buffer.setReplacementPreview(preview)
             }
         }
@@ -660,6 +689,13 @@ final class DictationController: ObservableObject {
         audio.onLevel = { [weak self] value in
             self?.level = value
         }
+        audio.onFailure = { [weak self] error in
+            self?.fail(error.localizedDescription)
+        }
+        audio.onDeviceFallback = { [weak self] name in
+            // Not an error: capture is running, just on a different microphone.
+            self?.status = "Selected mic was silent — using \(name)"
+        }
 
         do {
             try engine.start()
@@ -716,7 +752,7 @@ final class DictationController: ObservableObject {
                 Log.write("commit blocked: recognition finished with grey text still staged")
                 return
             }
-            performCommitAfterRendering(send: pending.send)
+            performCommit(send: pending.send)
         }
     }
 
@@ -738,21 +774,8 @@ final class DictationController: ObservableObject {
                 Log.write("commit blocked: recognition timed out with grey text still staged")
                 return
             }
-            self.performCommitAfterRendering(send: pending.send)
+            self.performCommit(send: pending.send)
         }
-    }
-
-    /// Final transcript callbacks and onFinished can arrive in adjacent main-queue
-    /// blocks. Let SwiftUI/AppKit paint the final text in its committed colour before
-    /// injecting it, so the visible UI never appears to send a grey preview.
-    private func performCommitAfterRendering(send: Bool) {
-        renderedCommitWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, self.phase == .idle else { return }
-            self.performCommit(send: send)
-        }
-        renderedCommitWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     /// Drops our reference to the engine, but hands the last one to the next

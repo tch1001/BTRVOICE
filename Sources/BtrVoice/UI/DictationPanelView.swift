@@ -149,6 +149,7 @@ struct DictationPanelView: View {
                     text: buffer.replacementPreview == nil ? buffer.text : "",
                     partial: buffer.replacementPreview ?? buffer.partial,
                     revision: buffer.revision,
+                    commitPending: controller.isCommitPending,
                     placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
                     onEdit: { buffer.userDidEdit($0) },
                     onAdoptAll: { controller.adoptEditedText($0) },

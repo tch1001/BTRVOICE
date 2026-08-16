@@ -1,12 +1,13 @@
 import Combine
 import Foundation
 
-/// Starts and monitors the local Jarvis Voice HTTP surface for BtrVoice.
+/// Starts and monitors the local trusted Jarvis gateway for BtrVoice.
 ///
 /// The service is a direct process launch, not an LLM request. If another service is
-/// already listening, BtrVoice simply reuses it. Processes started here live for the
-/// BtrVoice application lifetime so tracked tasks and persistent framework alerts remain
-/// available when the window is closed, and are terminated when BtrVoice quits.
+/// already listening, BtrVoice simply reuses it. The native SwiftUI console uses its
+/// JSON endpoints for unified history, named tools, tasks, and lifecycle recovery; no
+/// browser or WKWebView is involved. Processes started here live for the BtrVoice app
+/// lifetime and are terminated when BtrVoice quits.
 @MainActor
 final class JarvisVoiceService: ObservableObject {
     static let shared = JarvisVoiceService()
@@ -97,8 +98,8 @@ final class JarvisVoiceService: ObservableObject {
         startupTask?.cancel()
         voice.output.fileHandleForReading.readabilityHandler = nil
         if voice.process.isRunning { voice.process.terminate() }
-        // Keep `.ready` and the webview mounted. The established WebRTC call does not
-        // contain the API key; only future session setup needs the replacement bridge.
+        // Keep `.ready` and the native window mounted. The OpenAI WebSocket is owned by
+        // the app; replacing this gateway only refreshes tools and shared history.
         startupTask = Task { [weak self] in
             guard let self else { return }
             for _ in 0..<20 {
@@ -204,7 +205,7 @@ final class JarvisVoiceService: ObservableObject {
     }
 
     /// Health monitoring never changes `.ready`, because doing so would dismantle the
-    /// WKWebView and drop an otherwise healthy browser-to-Realtime conversation.
+    /// SwiftUI console and drop an otherwise healthy native Realtime conversation.
     private func startMonitor() {
         monitorTask?.cancel()
         monitorTask = Task { [weak self] in

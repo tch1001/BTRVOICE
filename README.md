@@ -117,6 +117,29 @@ Under the menu-bar item › Settings:
 - **Panel follows the text caret** — off pins the panel to bottom-centre instead.
 - **Stop listening after a pause** — hands-free end-of-utterance detection.
 
+### Jarvis Voice and the local owner filter
+
+**Start Jarvis** opens a compact native SwiftUI GPT Realtime console rather than the
+ordinary dictation buffer. It uses AVAudioEngine for full-duplex capture and playback;
+there is no WKWebView, browser microphone, or AudioWorklet in this path. Only the
+conversation scrolls. Voice controls, output mode, the local filter, and a three-row
+current-work summary stay visible in one small window; framework events are reduced to
+an occasional catch-up/restart banner instead of a separate feed.
+
+The **My voice only** card adds the local owner filter:
+
+1. Start the voice session and choose **Enroll my voice**.
+2. The first setup downloads FluidAudio's pinned Core ML Sortformer weights.
+3. Speak naturally for six seconds. The sample stays in Application Support on this Mac.
+4. With **My voice only** enabled, Apple's native VoiceProcessingIO echo-cancels
+   Jarvis's speaker playback and the local model masks non-owner or overlapping speaker
+   frames before native PCM reaches Realtime over WebSocket.
+
+Headphones are not required. Filtering adds roughly 1.2 seconds of input delay, and an
+enabled filter fails closed if classification fails. **Forget voice** removes the local
+enrollment. Voice matching is a conversational filter, not authentication; confirmed
+Jarvis actions keep their normal safety checks.
+
 ## How it fits together
 
 ```

@@ -15,6 +15,10 @@ struct BufferTextView: NSViewRepresentable {
     let text: String
     let partial: String
     let revision: Int
+    /// A commit has already been requested. The suffix is still recognizer-owned,
+    /// but showing it grey while the final response drains makes the app appear to
+    /// be transcribing again instead of completing the user's click.
+    let commitPending: Bool
     let placeholder: String
     let onEdit: (String) -> Void
     let onAdoptAll: (String) -> Void
@@ -60,7 +64,12 @@ struct BufferTextView: NSViewRepresentable {
         scroll.autohidesScrollers = true
 
         context.coordinator.textView = textView
-        context.coordinator.reload(committed: text, suffix: partialSuffix, revision: revision)
+        context.coordinator.reload(
+            committed: text,
+            suffix: partialSuffix,
+            revision: revision,
+            commitPending: commitPending
+        )
         return scroll
     }
 
@@ -75,11 +84,18 @@ struct BufferTextView: NSViewRepresentable {
         if context.coordinator.appliedRevision != revision {
             // Committed text changed on our side (segment landed, clear, undo…):
             // rebuild the whole view content.
-            context.coordinator.reload(committed: text, suffix: partialSuffix, revision: revision)
+            context.coordinator.reload(
+                committed: text,
+                suffix: partialSuffix,
+                revision: revision,
+                commitPending: commitPending
+            )
         } else if context.coordinator.displayedSuffix != partialSuffix {
             // Only the live tail moved: surgically replace the grey suffix so the
             // user's cursor and selection in the committed region stay put.
-            context.coordinator.replaceSuffix(with: partialSuffix)
+            context.coordinator.replaceSuffix(with: partialSuffix, commitPending: commitPending)
+        } else if context.coordinator.displayedSuffixCommitPending != commitPending {
+            context.coordinator.restyleSuffix(commitPending: commitPending)
         }
     }
 
@@ -91,6 +107,7 @@ struct BufferTextView: NSViewRepresentable {
         var appliedRevision: Int = -1
         /// Exactly what the grey region currently shows, separator included.
         var displayedSuffix: String = ""
+        var displayedSuffixCommitPending = false
         weak var textView: NSTextView?
         /// True while we mutate the view programmatically, so textDidChange ignores it.
         private var mutating = false
@@ -109,14 +126,18 @@ struct BufferTextView: NSViewRepresentable {
             .foregroundColor: NSColor.labelColor,
         ]
 
-        func reload(committed: String, suffix: String, revision: Int) {
+        func reload(committed: String, suffix: String, revision: Int, commitPending: Bool) {
             guard let textView else { return }
             appliedRevision = revision
             displayedSuffix = suffix
+            displayedSuffixCommitPending = commitPending
 
             let wasAtEnd = textView.selectedRange().location >= (textView.string as NSString).length
             let content = NSMutableAttributedString(string: committed, attributes: Self.committedAttributes)
-            content.append(NSAttributedString(string: suffix, attributes: Self.partialAttributes))
+            content.append(NSAttributedString(
+                string: suffix,
+                attributes: commitPending ? Self.committedAttributes : Self.partialAttributes
+            ))
 
             mutating = true
             textView.textStorage?.setAttributedString(content)
@@ -131,7 +152,7 @@ struct BufferTextView: NSViewRepresentable {
             textView.needsDisplay = true
         }
 
-        func replaceSuffix(with newSuffix: String) {
+        func replaceSuffix(with newSuffix: String, commitPending: Bool) {
             guard let textView, let storage = textView.textStorage else { return }
             let full = textView.string as NSString
             let oldLength = (displayedSuffix as NSString).length
@@ -152,17 +173,44 @@ struct BufferTextView: NSViewRepresentable {
             mutating = true
             storage.replaceCharacters(
                 in: range,
-                with: NSAttributedString(string: newSuffix, attributes: Self.partialAttributes)
+                with: NSAttributedString(
+                    string: newSuffix,
+                    attributes: commitPending ? Self.committedAttributes : Self.partialAttributes
+                )
             )
             textView.typingAttributes = Self.committedAttributes
             mutating = false
 
             displayedSuffix = newSuffix
+            displayedSuffixCommitPending = commitPending
             let end = (textView.string as NSString).length
             if followTail {
                 textView.setSelectedRange(NSRange(location: end, length: 0))
             }
             textView.scrollRangeToVisible(NSRange(location: end, length: 0))
+            textView.needsDisplay = true
+        }
+
+        func restyleSuffix(commitPending: Bool) {
+            guard let textView, let storage = textView.textStorage else { return }
+            let full = textView.string as NSString
+            let suffixLength = (displayedSuffix as NSString).length
+            guard suffixLength > 0, full.length >= suffixLength,
+                  full.substring(from: full.length - suffixLength) == displayedSuffix
+            else {
+                displayedSuffixCommitPending = commitPending
+                return
+            }
+
+            let range = NSRange(location: full.length - suffixLength, length: suffixLength)
+            mutating = true
+            storage.setAttributes(
+                commitPending ? Self.committedAttributes : Self.partialAttributes,
+                range: range
+            )
+            textView.typingAttributes = Self.committedAttributes
+            mutating = false
+            displayedSuffixCommitPending = commitPending
             textView.needsDisplay = true
         }
 

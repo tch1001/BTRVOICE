@@ -98,6 +98,10 @@ final class Settings: ObservableObject {
     /// The "brain" column in the panel while the GPT Editor engine is active.
     @Published var showEditorBrain: Bool { didSet { store.set(showEditorBrain, forKey: Key.showEditorBrain) } }
     @Published var editorBrainWidth: Double { didSet { store.set(editorBrainWidth, forKey: Key.editorBrainWidth) } }
+    /// Generic persisted source IDs make today's microphone picker extensible to
+    /// iPhone, glasses, and other input types later.
+    @Published var inputSourceID: String { didSet { store.set(inputSourceID, forKey: Key.inputSourceID) } }
+    @Published var inputSourceName: String { didSet { store.set(inputSourceName, forKey: Key.inputSourceName) } }
 
     /// A second row with large, round Voice and Insert & Send targets, pinned to the
     /// bottom of the panel. For an external-monitor setup where the panel
@@ -128,6 +132,8 @@ final class Settings: ObservableObject {
         static let showEditorBrain = "showEditorBrain"
         static let editorBrainWidth = "editorBrainWidth"
         static let biggerBottomButtons = "biggerBottomButtons"
+        static let inputSourceID = "inputSourceID"
+        static let inputSourceName = "inputSourceName"
     }
 
     private init() {
@@ -156,6 +162,8 @@ final class Settings: ObservableObject {
             // On by default: the user asked for this as their standing layout for the
             // external-monitor / left-hand-by-the-Dock setup.
             Key.biggerBottomButtons: true,
+            Key.inputSourceID: AudioInputSourceID.systemDefault,
+            Key.inputSourceName: "",
         ])
 
         onDeviceOnly = store.bool(forKey: Key.onDeviceOnly)
@@ -174,6 +182,8 @@ final class Settings: ObservableObject {
         jarvisBackend = JarvisBackend(rawValue: store.string(forKey: Key.jarvisBackend) ?? "") ?? .onDevice
         showEditorBrain = store.bool(forKey: Key.showEditorBrain)
         biggerBottomButtons = store.bool(forKey: Key.biggerBottomButtons)
+        inputSourceID = store.string(forKey: Key.inputSourceID) ?? AudioInputSourceID.systemDefault
+        inputSourceName = store.string(forKey: Key.inputSourceName) ?? ""
         editorBrainWidth = min(
             max(store.double(forKey: Key.editorBrainWidth), Self.editorBrainWidthRange.lowerBound),
             Self.editorBrainWidthRange.upperBound

@@ -74,6 +74,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // minimal: dictate, Jarvis, settings, health.
         menu.addItem(.separator())
         menu.addItem(jarvisItem())
+        menu.addItem(inputsItem())
         menu.addItem(settingsItem())
         menu.addItem(item("Reset BtrVoice Position", action: #selector(resetBtrVoicePosition)))
 
@@ -223,6 +224,69 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return parent
     }
 
+    private func inputsItem() -> NSMenuItem {
+        let parent = NSMenuItem(title: "Inputs", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let microphones = AudioInputSourceCatalog.microphones()
+        let selectedID = settings.inputSourceID
+
+        let defaultDevice = microphones.first(where: \.isSystemDefault)
+        let systemTitle = defaultDevice.map { "System Default — \($0.name)" } ?? "System Default"
+        let system = NSMenuItem(title: systemTitle, action: #selector(selectInputSource(_:)), keyEquivalent: "")
+        system.target = self
+        system.representedObject = [
+            "id": AudioInputSourceID.systemDefault,
+            "name": "",
+        ]
+        system.state = selectedID == AudioInputSourceID.systemDefault ? .on : .off
+        system.toolTip = "Follow the input selected in macOS Sound Settings"
+        submenu.addItem(system)
+
+        submenu.addItem(.separator())
+        let heading = NSMenuItem(title: "Connected Microphones", action: nil, keyEquivalent: "")
+        heading.isEnabled = false
+        submenu.addItem(heading)
+
+        if microphones.isEmpty {
+            let none = NSMenuItem(title: "No microphones found", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            submenu.addItem(none)
+        } else {
+            for microphone in microphones {
+                let entry = NSMenuItem(
+                    title: microphone.name,
+                    action: #selector(selectInputSource(_:)),
+                    keyEquivalent: ""
+                )
+                entry.target = self
+                entry.representedObject = [
+                    "id": microphone.sourceID,
+                    "name": microphone.name,
+                ]
+                entry.state = selectedID == microphone.sourceID ? .on : .off
+                entry.toolTip = microphone.isSystemDefault
+                    ? "Pin BtrVoice to this microphone even if the macOS default changes"
+                    : "Use this microphone for BtrVoice dictation"
+                submenu.addItem(entry)
+            }
+        }
+
+        if selectedID != AudioInputSourceID.systemDefault,
+           !microphones.contains(where: { $0.sourceID == selectedID }) {
+            submenu.addItem(.separator())
+            let name = settings.inputSourceName.isEmpty
+                ? "Selected microphone unavailable"
+                : "\(settings.inputSourceName) — Not Connected"
+            let unavailable = NSMenuItem(title: name, action: nil, keyEquivalent: "")
+            unavailable.isEnabled = false
+            unavailable.state = .on
+            submenu.addItem(unavailable)
+        }
+
+        parent.submenu = submenu
+        return parent
+    }
+
     private func item(_ title: String, action: Selector, enabled: Bool = true) -> NSMenuItem {
         let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
         entry.target = self
@@ -269,6 +333,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleBiggerBottomButtons() { settings.biggerBottomButtons.toggle() }
     @objc private func toggleEditorActivity() { settings.showEditorBrain.toggle() }
     @objc private func toggleJarvisAuto() { settings.jarvisAutoCleanup.toggle() }
+
+    @objc private func selectInputSource(_ sender: NSMenuItem) {
+        guard let selection = sender.representedObject as? [String: String],
+              let sourceID = selection["id"] else { return }
+        settings.inputSourceID = sourceID
+        settings.inputSourceName = selection["name"] ?? ""
+        controller.inputSourceDidChange()
+        Log.write(
+            "input source → "
+                + AudioInputSourceCatalog.selectionLabel(
+                    sourceID: settings.inputSourceID,
+                    savedName: settings.inputSourceName
+                )
+        )
+    }
 
     // MARK: - Keystroke timing diagnostic
     //

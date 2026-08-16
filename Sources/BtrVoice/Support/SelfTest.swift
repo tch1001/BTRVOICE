@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 
 /// `BtrVoice --self-test` exercises the parts that don't need a microphone, a screen,
@@ -85,6 +86,15 @@ enum SelfTest {
             check("empty input yields nothing", actions.isEmpty, "\(actions)")
         }
 
+        print("Inputs")
+        do {
+            let source = AudioInputSourceID.microphone(uid: "USB microphone 1")
+            check("microphone source IDs preserve the device UID",
+                  AudioInputSourceID.microphoneUID(from: source) == "USB microphone 1", source)
+            check("system default is distinct from a pinned microphone",
+                  AudioInputSourceID.microphoneUID(from: AudioInputSourceID.systemDefault) == nil)
+        }
+
         print("Jarvis")
         do {
             let bundle = URL(fileURLWithPath: "/Users/example/btr_voice/build/BtrVoice.app")
@@ -127,6 +137,112 @@ enum SelfTest {
             check("jarvis utterance keeps command words verbatim",
                   VoiceCommands.parse("jarvis remember do paste means control v", enabled: true)
                   == [.jarvis("jarvis remember do paste means control v")])
+        }
+        do {
+            let ownerOnly = SpeakerFrameGate.classify(
+                predictions: [0.82, 0.03, 0.02, 0.01],
+                speakerCount: 4,
+                ownerIndex: 0
+            )
+            check("owner-only speaker frames pass the local voice gate",
+                  ownerOnly.mask == [true] && !ownerOnly.overlap)
+
+            let anotherSpeaker = SpeakerFrameGate.classify(
+                predictions: [0.04, 0.88, 0.02, 0.01],
+                speakerCount: 4,
+                ownerIndex: 0
+            )
+            check("another speaker is withheld before Realtime",
+                  anotherSpeaker.mask == [false] && !anotherSpeaker.overlap)
+
+            let overlapping = SpeakerFrameGate.classify(
+                predictions: [0.83, 0.76, 0.02, 0.01],
+                speakerCount: 4,
+                ownerIndex: 0
+            )
+            check("overlapping speakers are withheld rather than guessed",
+                  overlapping.mask == [false] && overlapping.overlap)
+        }
+        do {
+            let samples = Data([0x10, 0x27, 0xf0, 0xd8, 0x20, 0x4e, 0xe0, 0xb1])
+            let accepted = JarvisPCMFrameMask.apply(
+                pcm16: samples,
+                mask: [true],
+                frameDurationMilliseconds: 80,
+                sampleRate: 50
+            )
+            check("native owner mask forwards a non-empty PCM window", !accepted.isEmpty)
+            let missingDecision = JarvisPCMFrameMask.apply(
+                    pcm16: samples,
+                    mask: [],
+                    frameDurationMilliseconds: 80,
+                    sampleRate: 50
+                  )
+            check("native empty speaker decisions fail closed to timed silence",
+                  missingDecision.count == samples.count && missingDecision.allSatisfy { $0 == 0 })
+            let rejected = JarvisPCMFrameMask.apply(
+                    pcm16: samples,
+                    mask: [false],
+                    frameDurationMilliseconds: 80,
+                    sampleRate: 50
+                  )
+            check("native rejected speakers become silence before Realtime",
+                  rejected.count == samples.count && rejected.allSatisfy { $0 == 0 })
+        }
+        do {
+            let builtInMic = JarvisAudioDevice(
+                objectID: 1, uid: "builtin-mic", name: "Mac microphone",
+                transportType: kAudioDeviceTransportTypeBuiltIn,
+                inputChannels: 1, outputChannels: 0, relatedDeviceIDs: [],
+                isDefaultInput: false, isDefaultOutput: false
+            )
+            let builtInSpeakers = JarvisAudioDevice(
+                objectID: 2, uid: "builtin-output", name: "Mac speakers",
+                transportType: kAudioDeviceTransportTypeBuiltIn,
+                inputChannels: 0, outputChannels: 2, relatedDeviceIDs: [],
+                isDefaultInput: false, isDefaultOutput: true
+            )
+            let usbInterface = JarvisAudioDevice(
+                objectID: 3, uid: "usb-duplex", name: "USB interface",
+                transportType: kAudioDeviceTransportTypeUSB,
+                inputChannels: 2, outputChannels: 2, relatedDeviceIDs: [],
+                isDefaultInput: true, isDefaultOutput: false
+            )
+            check("a duplex audio device is an echo-cancellation pair",
+                  JarvisAudioDeviceCatalog.likelySupportsEchoCancellation(
+                    input: usbInterface, output: usbInterface
+                  ))
+            check("the built-in microphone and speakers are an echo-cancellation pair",
+                  JarvisAudioDeviceCatalog.likelySupportsEchoCancellation(
+                    input: builtInMic, output: builtInSpeakers
+                  ))
+            check("an app-only device selection does not start the system voice processor",
+                  !JarvisAudioDeviceCatalog.supportsSystemVoiceProcessing(
+                    input: builtInMic, output: builtInSpeakers
+                  ))
+            let defaultBuiltInMic = JarvisAudioDevice(
+                objectID: 1, uid: "builtin-mic", name: "Mac microphone",
+                transportType: kAudioDeviceTransportTypeBuiltIn,
+                inputChannels: 1, outputChannels: 0, relatedDeviceIDs: [],
+                isDefaultInput: true, isDefaultOutput: false
+            )
+            check("the compatible macOS default pair starts the system voice processor",
+                  JarvisAudioDeviceCatalog.supportsSystemVoiceProcessing(
+                    input: defaultBuiltInMic, output: builtInSpeakers
+                  ))
+            check("an unrelated USB microphone and built-in speakers need guidance",
+                  !JarvisAudioDeviceCatalog.likelySupportsEchoCancellation(
+                    input: usbInterface, output: builtInSpeakers
+                  ))
+            check("the route helper recommends a microphone paired with the speakers",
+                  JarvisAudioDeviceCatalog.recommendedInput(
+                    for: builtInSpeakers,
+                    among: [usbInterface, builtInMic]
+                  ) == builtInMic)
+            let liveCatalog = JarvisAudioDeviceCatalog.snapshot()
+            check("native audio discovery separates input and output devices",
+                  liveCatalog.inputs.allSatisfy(\.hasInput)
+                    && liveCatalog.outputs.allSatisfy(\.hasOutput))
         }
         do {
             check("remember is classified as a note",

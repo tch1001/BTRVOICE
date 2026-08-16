@@ -23,6 +23,7 @@ enum Diagnostics {
         lines.append("Buffer:        \(controller.buffer.committedText.count) characters")
         let active = DictationController.resolveEngine(from: settings.engineChoice)
         lines.append("Engine:        \(active == .speechAnalyzer ? "SpeechAnalyzer (macOS 26)" : "SFSpeechRecognizer (legacy)") — setting: \(settings.engineChoice.label)")
+        lines.append("Input:         \(AudioInputSourceCatalog.selectionLabel(sourceID: settings.inputSourceID, savedName: settings.inputSourceName))")
         lines.append("Insert mode:   \(settings.injectionMode.label)")
         lines.append("Newlines:      \(settings.newlineMode.label)")
         lines.append("Recognition:   \(settings.onDeviceOnly ? "on-device preferred" : "server")")
