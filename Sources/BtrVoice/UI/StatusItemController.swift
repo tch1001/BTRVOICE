@@ -231,8 +231,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let selectedID = settings.inputSourceID
 
         let defaultDevice = microphones.first(where: \.isSystemDefault)
-        let systemTitle = defaultDevice.map { "System Default — \($0.name)" } ?? "System Default"
-        let system = NSMenuItem(title: systemTitle, action: #selector(selectInputSource(_:)), keyEquivalent: "")
+        let system = NSMenuItem(
+            title: "Follow macOS System Default",
+            action: #selector(selectInputSource(_:)),
+            keyEquivalent: ""
+        )
         system.target = self
         system.representedObject = [
             "id": AudioInputSourceID.systemDefault,
@@ -241,6 +244,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         system.state = selectedID == AudioInputSourceID.systemDefault ? .on : .off
         system.toolTip = "Follow the input selected in macOS Sound Settings"
         submenu.addItem(system)
+
+        if let defaultDevice {
+            let current = NSMenuItem(
+                title: "Currently: \(defaultDevice.name)",
+                action: nil,
+                keyEquivalent: ""
+            )
+            current.isEnabled = false
+            submenu.addItem(current)
+        }
 
         submenu.addItem(.separator())
         let heading = NSMenuItem(title: "Connected Microphones", action: nil, keyEquivalent: "")

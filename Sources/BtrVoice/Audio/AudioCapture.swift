@@ -6,30 +6,24 @@ import Foundation
 /// smoothed 0...1 level for the waveform, plus a running "how long has it been
 /// quiet" measure used for silence-aware segment rotation and auto-stop.
 ///
-/// Device pinning: rather than a hand-rolled AUHAL unit (which silently delivered
-/// nothing for some USB devices), the selected device is set as the *engine's* input
-/// device via `kAudioOutputUnitProperty_CurrentDevice` on the input node. One capture
-/// path for every device, and it's the one that is known to work. The system default
-/// is never changed.
+/// Device pinning: AVAudioEngine's native input route is used whenever the selected
+/// microphone is already the macOS default. Only a genuinely non-default selection is
+/// bound through `kAudioOutputUnitProperty_CurrentDevice`; rebinding the default route
+/// can leave the engine running without delivering any PCM buffers.
 final class AudioCapture {
 
     /// Called on the audio thread. Keep it cheap.
     var onBuffer: ((AVAudioPCMBuffer) -> Void)?
     /// Called on the main thread, throttled to ~30 Hz.
     var onLevel: ((Float) -> Void)?
-    /// Capture can start successfully yet never deliver a single buffer, and by then
-    /// the fallback chain has already been tried. Reported on the main thread.
+    /// Capture can start successfully yet never deliver a single buffer. Reported on
+    /// the main thread without silently switching away from the selected input.
     var onFailure: ((Error) -> Void)?
-    /// The device we actually ended up on differs from the one asked for
-    /// (silent-device fallback). Main thread; the controller surfaces it as status.
-    var onDeviceFallback: ((String) -> Void)?
 
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var tapInstalled = false
     private var activeInputFormat: AVAudioFormat?
-    private var activeDeviceName = ""
     private var startupWatchdog: DispatchWorkItem?
-    private var fallbackAttempted = false
     private var running = false
     private var smoothedLevel: Float = 0
     private var lastLevelPublish = CFAbsoluteTimeGetCurrent()
@@ -56,23 +50,13 @@ final class AudioCapture {
         guard !running else { return }
 
         let settings = Settings.shared
-        fallbackAttempted = false
-
-        let selected: AudioInputDevice
-        do {
-            selected = try AudioInputSourceCatalog.resolveDevice(
-                sourceID: settings.inputSourceID,
-                savedName: settings.inputSourceName
-            )
-        } catch AudioInputSourceError.selectedMicrophoneUnavailable {
-            let fallback = try AudioInputSourceCatalog.systemDefaultDevice()
-            Log.write(
-                "audio input: saved microphone \(settings.inputSourceName) is disconnected; "
-                    + "using \(fallback.name) for this session"
-            )
-            try begin(device: fallback)
-            return
-        }
+        let selected = try AudioInputSourceCatalog.resolveDevice(
+            sourceID: settings.inputSourceID,
+            savedName: settings.inputSourceName
+        )
+        // A fresh engine cannot retain a CurrentDevice pin from an earlier session.
+        // This matters when the user switches back to Follow macOS System Default.
+        engine = AVAudioEngine()
         try begin(device: selected)
     }
 
@@ -97,9 +81,11 @@ final class AudioCapture {
 
         let input = engine.inputNode
 
-        // Pin the engine's input to the chosen device. Explicit even for the system
-        // default, because the engine's unit remembers the previous session's pin.
-        if let unit = input.audioUnit {
+        // Let AVAudioEngine own its normal default-device route. Explicitly setting
+        // CurrentDevice to that same device is not a no-op: on some route/sample-rate
+        // combinations the engine starts successfully but its tap never receives PCM.
+        let needsExplicitPin = !device.isSystemDefault
+        if needsExplicitPin, let unit = input.audioUnit {
             var deviceID = device.objectID
             let status = AudioUnitSetProperty(
                 unit,
@@ -112,7 +98,7 @@ final class AudioCapture {
             guard status == noErr else {
                 throw AudioInputSourceError.couldNotBind(device.name, status)
             }
-        } else if !device.isSystemDefault {
+        } else if needsExplicitPin {
             throw CaptureError.couldNotStart(device.name, "the audio engine exposes no input unit")
         }
 
@@ -134,12 +120,11 @@ final class AudioCapture {
         }
 
         activeInputFormat = format
-        activeDeviceName = device.name
         running = true
         armStartupWatchdog(deviceName: device.name)
         Log.write(
             "audio input: \(device.name)"
-                + (device.isSystemDefault ? " (system default)" : " (pinned)")
+                + (needsExplicitPin ? " (explicit pin)" : " (native default route)")
                 + " \(Int(format.sampleRate))Hz/\(format.channelCount)ch"
         )
     }
@@ -183,11 +168,10 @@ final class AudioCapture {
         DispatchQueue.main.async { [weak self] in self?.onLevel?(value) }
     }
 
-    // MARK: - Silent-device fallback
+    // MARK: - Silent-device detection
 
     /// A device can accept a session and stay mute (sleeping USB interfaces do this).
-    /// Rather than surfacing an error every session, quietly move to a device that
-    /// actually produces audio; only give up when the alternatives are silent too.
+    /// Surface that failure instead of quietly changing the user's selected input.
     private func armStartupWatchdog(deviceName: String) {
         startupWatchdog?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -199,38 +183,10 @@ final class AudioCapture {
 
             Log.write("audio input: no PCM buffers from \(deviceName) after 2s")
             self.stop()
-
-            if !self.fallbackAttempted, let next = self.fallbackDevice(after: deviceName) {
-                self.fallbackAttempted = true
-                do {
-                    try self.begin(device: next)
-                    Log.write("audio input: fell back to \(next.name)")
-                    let name = next.name
-                    DispatchQueue.main.async { self.onDeviceFallback?(name) }
-                    return
-                } catch {
-                    Log.write("audio input: fallback to \(next.name) failed — \(error.localizedDescription)")
-                }
-            }
             self.onFailure?(CaptureError.noAudioData(deviceName))
         }
         startupWatchdog = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
-    }
-
-    /// Best next candidate: the built-in microphone if it wasn't the one that just
-    /// failed (it never sleeps), otherwise the system default, otherwise anything else.
-    private func fallbackDevice(after failedName: String) -> AudioInputDevice? {
-        let devices = AudioInputSourceCatalog.microphones()
-        let builtIn = devices.first {
-            $0.uid.localizedCaseInsensitiveContains("BuiltIn")
-                || $0.name.localizedCaseInsensitiveContains("MacBook")
-        }
-        for candidate in [builtIn, devices.first(where: \.isSystemDefault)].compactMap({ $0 })
-        where candidate.name != failedName {
-            return candidate
-        }
-        return devices.first { $0.name != failedName }
     }
 
     private static func rms(of buffer: AVAudioPCMBuffer) -> Float {
@@ -258,7 +214,7 @@ final class AudioCapture {
             case .couldNotStart(let name, let detail):
                 return "BtrVoice could not start \(name): \(detail)"
             case .noAudioData(let name):
-                return "\(name) and the fallback microphones sent no audio. Check Inputs and your device connections."
+                return "\(name) sent no audio. Check Inputs and the device connection."
             }
         }
     }

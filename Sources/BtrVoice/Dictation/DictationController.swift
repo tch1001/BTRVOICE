@@ -692,10 +692,6 @@ final class DictationController: ObservableObject {
         audio.onFailure = { [weak self] error in
             self?.fail(error.localizedDescription)
         }
-        audio.onDeviceFallback = { [weak self] name in
-            // Not an error: capture is running, just on a different microphone.
-            self?.status = "Selected mic was silent — using \(name)"
-        }
 
         do {
             try engine.start()
