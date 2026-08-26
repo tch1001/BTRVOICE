@@ -11,6 +11,8 @@ enum BufferAction: Equatable {
     case selectAllInTarget
     /// "do click" — left-click at the current pointer position.
     case clickAtPointer
+    /// "go here" — press F12 to jump from the code under the pointer.
+    case jumpToReferences
     /// "do insert" — type the buffer into the focused app.
     case commit
     /// "do send it" — type the buffer into the focused app, then press Return.
@@ -51,6 +53,13 @@ enum VoiceCommands {
         ["send", "it"]: .commitAndSend,
     ]
 
+    /// Intentionally short, exact phrases the user chose as commands without the
+    /// normal "do" guard. Exact matching keeps a longer dictated sentence that
+    /// happens to contain these words from unexpectedly controlling another app.
+    private static let directTable: [[String]: BufferAction] = [
+        ["go", "here"]: .jumpToReferences,
+    ]
+
     /// The GPT Editor can't run the spoken-command parser (it hears audio, not
     /// our transcript), so it's instructed to emit `[[cmd:name]]` markers
     /// instead of transcribing command phrases. This strips the markers and
@@ -61,6 +70,7 @@ enum VoiceCommands {
             "copy": .copyInTarget,
             "selectall": .selectAllInTarget,
             "click": .clickAtPointer,
+            "references": .jumpToReferences,
             "insert": .commit,
             "send": .commitAndSend,
         ]
@@ -99,6 +109,10 @@ enum VoiceCommands {
         let words = segment.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).map(String.init)
         var actions: [BufferAction] = []
         var literal: [String] = []
+
+        if let directAction = directTable[words.map(normalise)] {
+            return [directAction]
+        }
 
         // "Jarvis" is a wake word: the WHOLE utterance goes to the assistant
         // verbatim — wake word, surrounding words, everything. The model reads

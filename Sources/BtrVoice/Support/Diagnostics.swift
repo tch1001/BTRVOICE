@@ -27,6 +27,7 @@ enum Diagnostics {
         lines.append("Insert mode:   \(settings.injectionMode.label)")
         lines.append("Newlines:      \(settings.newlineMode.label)")
         lines.append("Recognition:   \(settings.onDeviceOnly ? "on-device preferred" : "server")")
+        lines.append("Commands:      \(settings.runVoiceCommandsImmediately ? "immediate" : "review countdown")")
         lines.append("")
         lines.append("Log file:      \(Log.fileURL.path)")
         return lines.joined(separator: "\n")

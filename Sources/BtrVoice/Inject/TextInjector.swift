@@ -23,6 +23,9 @@ enum TextInjector {
     private static let cKeyCode: CGKeyCode = 8
     private static let aKeyCode: CGKeyCode = 0
     private static let deleteKeyCode: CGKeyCode = 51
+    private static let controlKeyCode: CGKeyCode = 59
+    private static let commandKeyCode: CGKeyCode = 55
+    static let f12KeyCode: CGKeyCode = 111
 
     /// A private event source does not inherit the real hardware modifier state, so
     /// a still-held ⌥ from the hotkey can't corrupt what we type.
@@ -159,7 +162,7 @@ enum TextInjector {
         "-": 27, "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35,
         "return": 36, "enter": 36, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42,
         ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "tab": 48, "space": 49, "`": 50,
-        "delete": 51, "backspace": 51, "escape": 53, "esc": 53,
+        "delete": 51, "backspace": 51, "escape": 53, "esc": 53, "f12": f12KeyCode,
         "left": 123, "right": 124, "down": 125, "up": 126,
     ]
 
@@ -213,7 +216,7 @@ enum TextInjector {
             // window server a beat so the chord lands after the app is key.
             usleep(80_000)
             let modifierKeys: [(CGEventFlags, CGKeyCode)] = [
-                (.maskControl, 59), (.maskAlternate, 58), (.maskShift, 56), (.maskCommand, 55),
+                (.maskControl, controlKeyCode), (.maskAlternate, 58), (.maskShift, 56), (.maskCommand, commandKeyCode),
             ]
             let held = modifierKeys.filter { flags.contains($0.0) }
             for (_, code) in held {

@@ -43,6 +43,21 @@ enum SelfTest {
             check("do copy presses ⌘C", VoiceCommands.parse("do copy", enabled: true) == [.copyInTarget])
             check("do select all presses ⌘A", VoiceCommands.parse("do select all", enabled: true) == [.selectAllInTarget])
             check("do click clicks", VoiceCommands.parse("do click", enabled: true) == [.clickAtPointer])
+            check("go here presses F12", VoiceCommands.parse("go here", enabled: true) == [.jumpToReferences])
+            check("go here tolerates recognition punctuation", VoiceCommands.parse("Go here.", enabled: true) == [.jumpToReferences])
+            check("go here stays guarded inside prose", VoiceCommands.parse("please go here now", enabled: true) == [.insert("please go here now")])
+            check("go here never waits for confirmation",
+                  !DictationController.voiceCommandNeedsConfirmation(
+                      .jumpToReferences, runImmediately: false
+                  ))
+            check("immediate command setting skips confirmation",
+                  !DictationController.voiceCommandNeedsConfirmation(
+                      .commitAndSend, runImmediately: true
+                  ))
+            check("disabling immediate commands restores confirmation",
+                  DictationController.voiceCommandNeedsConfirmation(
+                      .commitAndSend, runImmediately: false
+                  ))
             check("do insert commits", VoiceCommands.parse("do insert", enabled: true) == [.commit])
             check("do send it inserts and sends", VoiceCommands.parse("do send it", enabled: true) == [.commitAndSend])
             check("insert waits for finalized buffer", BufferAction.commit.requiresFinalizedBuffer)
@@ -57,14 +72,17 @@ enum SelfTest {
             check("no markers passes through", text2 == "just prose, no markers" && actions2.isEmpty)
             let (text3, actions3) = VoiceCommands.extractEditorCommands("[[cmd:paste]]")
             check("bare marker leaves empty text", text3.isEmpty && actions3 == [.pasteInTarget])
-            let (text4, _) = VoiceCommands.extractEditorCommands("keep this [[unknown junk]] clean")
-            check("unknown bracket junk is stripped", text4 == "keep this clean", text4)
+            let (text4, actions4) = VoiceCommands.extractEditorCommands("[[cmd:references]]")
+            check("go here editor marker presses F12", text4.isEmpty && actions4 == [.jumpToReferences])
+            let (text5, _) = VoiceCommands.extractEditorCommands("keep this [[unknown junk]] clean")
+            check("unknown bracket junk is stripped", text5 == "keep this clean", text5)
         }
         do {
             let combo = TextInjector.parseCombo("cmd+shift+p")
             check("cmd+shift+p parses", combo?.key == 35 && combo?.display == "⇧⌘P",
                   "\(String(describing: combo))")
             check("bare key parses", TextInjector.parseCombo("escape")?.display == "Escape")
+            check("F12 parses", TextInjector.parseCombo("f12")?.key == TextInjector.f12KeyCode)
             check("space separators work", TextInjector.parseCombo("ctrl c")?.display == "⌃C")
             check("unknown key rejected", TextInjector.parseCombo("cmd+banana") == nil)
             check("two plain keys rejected", TextInjector.parseCombo("a+b") == nil)

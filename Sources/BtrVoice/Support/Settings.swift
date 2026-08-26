@@ -82,6 +82,11 @@ final class Settings: ObservableObject {
     @Published var onDeviceOnly: Bool { didSet { store.set(onDeviceOnly, forKey: Key.onDeviceOnly) } }
     @Published var autoPunctuation: Bool { didSet { store.set(autoPunctuation, forKey: Key.autoPunctuation) } }
     @Published var voiceCommandsEnabled: Bool { didSet { store.set(voiceCommandsEnabled, forKey: Key.voiceCommands) } }
+    /// When enabled, spoken app commands execute as soon as they are recognised.
+    /// "Go here" is latency-sensitive and always executes immediately regardless.
+    @Published var runVoiceCommandsImmediately: Bool {
+        didSet { store.set(runVoiceCommandsImmediately, forKey: Key.runVoiceCommandsImmediately) }
+    }
     @Published var injectionMode: InjectionMode { didSet { store.set(injectionMode.rawValue, forKey: Key.injectionMode) } }
     @Published var newlineMode: NewlineMode { didSet { store.set(newlineMode.rawValue, forKey: Key.newlineMode) } }
     @Published var followCaret: Bool { didSet { store.set(followCaret, forKey: Key.followCaret) } }
@@ -103,8 +108,8 @@ final class Settings: ObservableObject {
     @Published var inputSourceID: String { didSet { store.set(inputSourceID, forKey: Key.inputSourceID) } }
     @Published var inputSourceName: String { didSet { store.set(inputSourceName, forKey: Key.inputSourceName) } }
 
-    /// A second row with large, round Voice and Insert & Send targets, pinned to the
-    /// bottom of the panel. For an external-monitor setup where the panel
+    /// A second row with large, round Voice, Insert & Send, and F12 targets,
+    /// pinned to the bottom of the panel. For an external-monitor setup where the panel
     /// lives at the bottom-left by the Dock and a resting left hand can hit big targets
     /// without aiming. The normal header/footer controls stay exactly as they were; this
     /// only adds.
@@ -118,6 +123,7 @@ final class Settings: ObservableObject {
         static let onDeviceOnly = "onDeviceOnly"
         static let autoPunctuation = "autoPunctuation"
         static let voiceCommands = "voiceCommandsEnabled"
+        static let runVoiceCommandsImmediately = "runVoiceCommandsImmediately"
         static let injectionMode = "injectionMode"
         static let newlineMode = "newlineMode"
         static let followCaret = "followCaret"
@@ -141,6 +147,9 @@ final class Settings: ObservableObject {
             Key.onDeviceOnly: true,
             Key.autoPunctuation: true,
             Key.voiceCommands: true,
+            // Fast by default: the user can opt back into the three-second review
+            // overlay for commands where confirmation is more valuable than speed.
+            Key.runVoiceCommandsImmediately: true,
             Key.injectionMode: InjectionMode.auto.rawValue,
             // Shift-Return by default: a newline that slipped into the buffer must
             // not press Enter and fire the message off early. Terminal users can
@@ -169,6 +178,7 @@ final class Settings: ObservableObject {
         onDeviceOnly = store.bool(forKey: Key.onDeviceOnly)
         autoPunctuation = store.bool(forKey: Key.autoPunctuation)
         voiceCommandsEnabled = store.bool(forKey: Key.voiceCommands)
+        runVoiceCommandsImmediately = store.bool(forKey: Key.runVoiceCommandsImmediately)
         injectionMode = InjectionMode(rawValue: store.string(forKey: Key.injectionMode) ?? "") ?? .auto
         newlineMode = NewlineMode(rawValue: store.string(forKey: Key.newlineMode) ?? "") ?? .returnKey
         followCaret = store.bool(forKey: Key.followCaret)

@@ -182,6 +182,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         submenu.addItem(toggle("Prefer on-device recognition", #selector(toggleOnDevice), settings.onDeviceOnly))
         submenu.addItem(toggle("Automatic punctuation", #selector(toggleAutoPunctuation), settings.autoPunctuation))
         submenu.addItem(toggle("Spoken commands", #selector(toggleVoiceCommands), settings.voiceCommandsEnabled))
+        submenu.addItem(toggle(
+            "Run voice commands immediately",
+            #selector(toggleRunVoiceCommandsImmediately),
+            settings.runVoiceCommandsImmediately
+        ))
         submenu.addItem(toggle("Panel follows the text caret", #selector(toggleFollowCaret), settings.followCaret))
         submenu.addItem(toggle("Stop listening after a pause", #selector(toggleStopOnSilence), settings.stopOnSilence))
         submenu.addItem(toggle("Clear buffer after inserting", #selector(toggleClearAfterCommit), settings.clearAfterCommit))
@@ -339,6 +344,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggleOnDevice() { settings.onDeviceOnly.toggle() }
     @objc private func toggleAutoPunctuation() { settings.autoPunctuation.toggle() }
     @objc private func toggleVoiceCommands() { settings.voiceCommandsEnabled.toggle() }
+    @objc private func toggleRunVoiceCommandsImmediately() {
+        settings.runVoiceCommandsImmediately.toggle()
+    }
     @objc private func toggleFollowCaret() { settings.followCaret.toggle() }
     @objc private func toggleStopOnSilence() { settings.stopOnSilence.toggle() }
     @objc private func toggleClearAfterCommit() { settings.clearAfterCommit.toggle() }
@@ -487,14 +495,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         let text = """
-        Say “do” plus a command while dictating. Without “do”, the words
-        are just transcribed. Each command shows a short countdown in the
-        panel before it fires — cancel it or fire it early from there.
+        Say “do” plus a command while dictating. The special “go here” command
+        needs no “do”; other unguarded words are transcribed. Commands run
+        immediately by default. Turn off
+        “Run voice commands immediately” in Settings to restore the review
+        countdown; “go here” always remains immediate.
 
         “do paste” — press ⌘V in the focused app
         “do copy” — press ⌘C
         “do select all” — press ⌘A
         “do click” — click at the mouse pointer
+        “go here” — press F12 to jump to references
         “do insert” — type the buffer into the focused app
         “do send it” — insert the buffer, then press Return
         (These work in the GPT Editor engine too.)

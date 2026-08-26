@@ -236,6 +236,17 @@ final class DictationController: ObservableObject {
         }
     }
 
+    /// Presses one literal Space in the target app through the same focus-safe path
+    /// used by the virtual keyboard.
+    func pressSpaceInTarget() {
+        pressVirtualKeyboardKey(49, flags: [])
+    }
+
+    /// Presses F12 in the target app without requiring a separate modifier gesture.
+    func jumpToReferencesInTarget() {
+        pressVirtualKeyboardKey(TextInjector.f12KeyCode, flags: [])
+    }
+
     func copyBufferToPasteboard() {
         // What you see is what you copy, live tail included.
         let text = buffer.displayText
@@ -438,15 +449,29 @@ final class DictationController: ObservableObject {
         inputHoldLock.lock(); inputHeldFlag = held; inputHoldLock.unlock()
     }
 
-    /// A spoken command doesn't fire immediately: the panel shows what's about to
-    /// happen, and the user gets a few seconds to cancel it (or fire it early).
+    /// Routes a spoken command either immediately or through the optional review
+    /// countdown. Code navigation is always immediate because its value is in acting
+    /// on the code currently under the pointer before that context changes.
     private func stagePendingCommand(_ action: BufferAction) {
+        if !Self.voiceCommandNeedsConfirmation(
+            action,
+            runImmediately: settings.runVoiceCommandsImmediately
+        ) {
+            pendingCommandTimer?.invalidate()
+            pendingCommandTimer = nil
+            pendingCommand = nil
+            setInputHold(false)
+            perform(action)
+            return
+        }
+
         let label: String
         switch action {
         case .pasteInTarget: label = "Paste (⌘V)"
         case .copyInTarget: label = "Copy (⌘C)"
         case .selectAllInTarget: label = "Select All (⌘A)"
         case .clickAtPointer: label = "Click"
+        case .jumpToReferences: label = "Jump to References (F12)"
         case .commit: label = "Insert"
         case .commitAndSend: label = "Insert & Send"
         case .pressKeys(let combo):
@@ -469,6 +494,16 @@ final class DictationController: ObservableObject {
         ) { [weak self] _ in
             self?.firePendingCommand()
         }
+    }
+
+    /// Internal so the no-countdown safety rules can be exercised without posting
+    /// real key events or requiring Accessibility permission in the self-test.
+    static func voiceCommandNeedsConfirmation(
+        _ action: BufferAction,
+        runImmediately: Bool
+    ) -> Bool {
+        if case .jumpToReferences = action { return false }
+        return !runImmediately
     }
 
     /// The countdown elapsed, or the user clicked "Now".
@@ -537,6 +572,14 @@ final class DictationController: ObservableObject {
             Log.write("voice command: click at pointer")
             status = "Clicked"
             TextInjector.clickAtPointer(completion: done)
+        case .jumpToReferences:
+            Log.write("voice command: jump to references (F12)")
+            status = "Jumped to references"
+            TextInjector.pressCombo(
+                key: TextInjector.f12KeyCode,
+                flags: [],
+                completion: done
+            )
         case .commit:
             Log.write("voice command: insert")
             commit(send: false)

@@ -330,8 +330,8 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                             "properties": [
                                 "action": [
                                     "type": "string",
-                                    "enum": ["paste", "copy", "select_all", "click", "insert", "send"],
-                                    "description": "paste = press Cmd-V in the target app; copy = press Cmd-C (copies whatever is selected there); select_all = press Cmd-A; click = left-click at the current mouse pointer; insert = type the current transcript into the target app; send = type the transcript, then press Return to send it.",
+                                    "enum": ["paste", "copy", "select_all", "click", "jump_to_references", "insert", "send"],
+                                    "description": "paste = press Cmd-V in the target app; copy = press Cmd-C (copies whatever is selected there); select_all = press Cmd-A; click = left-click at the current mouse pointer; jump_to_references = press F12; insert = type the current transcript into the target app; send = type the transcript, then press Return to send it.",
                                 ],
                             ],
                             "required": ["action"],
@@ -542,6 +542,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 "copy": .copyInTarget,
                 "select_all": .selectAllInTarget,
                 "click": .clickAtPointer,
+                "jump_to_references": .jumpToReferences,
                 "insert": .commit,
                 "send": .commitAndSend,
             ]
@@ -608,7 +609,8 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         put it in the transcript — instead append the matching marker at the very \
         end of your response, after the transcript text: "do paste" → [[cmd:paste]], \
         "do copy" → [[cmd:copy]], "do select all" → [[cmd:selectall]], "do click" \
-        → [[cmd:click]], "do insert" → [[cmd:insert]], "do send it" → [[cmd:send]]. \
+        → [[cmd:click]], "go here" → [[cmd:references]], "do insert" → [[cmd:insert]], \
+        "do send it" → [[cmd:send]]. \
         The app executes the marker (paste/copy/click keystrokes, or typing the \
         transcript into the target app). Emit a marker only for these phrases.
         - When the user TEACHES you a pattern — "remember that…", "from now on \

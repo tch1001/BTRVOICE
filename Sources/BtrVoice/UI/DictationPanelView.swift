@@ -352,13 +352,19 @@ struct DictationPanelView: View {
                 .help(settings.showEditorBrain ? "Hide the editor's brain" : "Show the editor's brain — what it hears, writes, and does")
             }
 
+            Button("Space") {
+                controller.pressSpaceInTarget()
+            }
+            .disabled(!permissions.accessibility)
+            .help("Press Space in \(targets.targetName ?? "the focused app")")
+
             Picker("", selection: $settings.newlineMode) {
                 ForEach(NewlineMode.allCases, id: \.self) { mode in
                     Text(mode.label).tag(mode)
                 }
             }
             .labelsHidden()
-            .frame(width: 168)
+            .frame(width: 124)
             .help("How newlines are typed. Use Shift-Return in chat apps so Return doesn't send early.")
         }
         .controlSize(.small)
@@ -406,6 +412,26 @@ struct DictationPanelView: View {
             .opacity(buffer.isEmpty ? 0.4 : 1)
             .accessibilityLabel("Insert and send")
             .help("Type the text, then press Return in the target app")
+
+            Button {
+                controller.jumpToReferencesInTarget()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor)
+                    Text("F12")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 58, height: 58)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!permissions.accessibility)
+            .opacity(permissions.accessibility ? 1 : 0.4)
+            .accessibilityLabel("Jump to References")
+            .accessibilityHint("Press F12 in the target app")
+            .help("Press F12 in \(targets.targetName ?? "the focused app")")
 
             Spacer(minLength: 0)
         }
