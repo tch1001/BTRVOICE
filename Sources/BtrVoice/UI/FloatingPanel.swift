@@ -6,6 +6,8 @@ import SwiftUI
 private final class PanelResizeCursorView: NSView {
 
     private let zoneInset: CGFloat
+    private var hoverTrackingArea: NSTrackingArea?
+    var onHover: ((NSPoint?) -> Void)?
 
     init(zoneInset: CGFloat) {
         self.zoneInset = zoneInset
@@ -30,6 +32,44 @@ private final class PanelResizeCursorView: NSView {
     /// resizing and must never fall through to background window movement.
     override var mouseDownCanMoveWindow: Bool { false }
     override var needsPanelToBecomeKey: Bool { false }
+
+    /// Own hover delivery at the same layer that owns edge hit-testing. Relying on
+    /// the hosting/content view is racy once background dragging is enabled: AppKit
+    /// can restore the arrow after the parent received its mouse-moved event.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [
+                .mouseMoved,
+                .cursorUpdate,
+                .mouseEnteredAndExited,
+                .activeAlways,
+                .inVisibleRect,
+            ],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHover?(event.locationInWindow)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onHover?(event.locationInWindow)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        onHover?(event.locationInWindow)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHover?(nil)
+    }
 
     override func resetCursorRects() {
         super.resetCursorRects()
@@ -211,6 +251,13 @@ final class FloatingPanel: NSPanel {
         resizeTrackingView = contentView
 
         let cursorView = PanelResizeCursorView(zoneInset: Self.resizeZoneInset)
+        cursorView.onHover = { [weak self] point in
+            if let point {
+                self?.updateResizeCursor(at: point)
+            } else {
+                self?.restoreArrowCursorIfNeeded()
+            }
+        }
         cursorView.frame = contentView.bounds
         cursorView.autoresizingMask = [.width, .height]
         contentView.addSubview(cursorView, positioned: .above, relativeTo: nil)
