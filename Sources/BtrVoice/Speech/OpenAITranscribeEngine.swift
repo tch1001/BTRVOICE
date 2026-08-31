@@ -21,6 +21,9 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
 
     private let model: String
     private var task: URLSessionWebSocketTask?
+    /// Identifies the live socket so callbacks from a Trash-retired connection
+    /// cannot append its old utterance to the fresh session.
+    private var connectionGeneration = 0
     private var converter: AVAudioConverter?
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 24_000, channels: 1, interleaved: true
@@ -56,13 +59,23 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
     }
 
     func start() throws {
+        try connect()
+    }
+
+    private func connect() throws {
         guard let key = OpenAIKeyStore.read() else { throw EngineError.noKey }
         var request = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime?intent=transcription")!)
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         let socket = URLSession.shared.webSocketTask(with: request)
+        lock.lock()
+        connectionGeneration += 1
+        let generation = connectionGeneration
+        ready = false
+        suppressUntil = .distantPast
         task = socket
+        lock.unlock()
         socket.resume()
-        receive()
+        receive(on: socket, generation: generation)
         Log.write("openai-stt: connecting (\(model))")
     }
 
@@ -80,9 +93,36 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
 
     func discardUtterance() {
         lock.lock()
+        let shouldReconnect = task != nil && !finishing && !cancelled
+        let retiredTask = shouldReconnect ? task : nil
         suppressUntil = Date()
         currentPartial = ""
+        if shouldReconnect {
+            connectionGeneration += 1
+            task = nil
+            ready = false
+            preRoll.removeAll()
+            errorReported = false
+            vadRetried = false
+        }
         lock.unlock()
+
+        // A new transcription connection also creates a new server-side audio
+        // stream. This is the only unambiguous boundary between the discarded
+        // utterance and words spoken after Trash; microphone capture keeps running
+        // and pre-roll buffers audio until the replacement session is ready.
+        if let retiredTask {
+            retiredTask.cancel(with: .normalClosure, reason: nil)
+            do {
+                try connect()
+            } catch {
+                reportError(error)
+            }
+        }
+        emit {
+            self.onPartial?("")
+            if shouldReconnect { self.onStatus?("Transcript cleared — reconnecting") }
+        }
     }
 
     func finish() {
@@ -102,16 +142,22 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
     func cancel() {
         lock.lock()
         cancelled = true
-        lock.unlock()
-        task?.cancel(with: .normalClosure, reason: nil)
+        connectionGeneration += 1
+        let retiredTask = task
         task = nil
+        lock.unlock()
+        retiredTask?.cancel(with: .normalClosure, reason: nil)
     }
 
     // MARK: - WebSocket
 
-    private func receive() {
-        task?.receive { [weak self] result in
+    private func receive(on socket: URLSessionWebSocketTask, generation: Int) {
+        socket.receive { [weak self] result in
             guard let self else { return }
+            self.lock.lock()
+            let isCurrentConnection = generation == self.connectionGeneration
+            self.lock.unlock()
+            guard isCurrentConnection else { return }
             switch result {
             case .failure(let error):
                 self.lock.lock()
@@ -120,15 +166,19 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
                 if !benign { self.reportError(EngineError.api(error.localizedDescription)) }
                 return
             case .success(.string(let text)):
-                self.handle(text)
+                self.handle(text, connectionGeneration: generation)
             case .success:
                 break
             }
-            self.receive()
+            self.receive(on: socket, generation: generation)
         }
     }
 
-    private func handle(_ text: String) {
+    private func handle(_ text: String, connectionGeneration: Int) {
+        lock.lock()
+        let isCurrentConnection = connectionGeneration == self.connectionGeneration
+        lock.unlock()
+        guard isCurrentConnection else { return }
         guard let data = text.data(using: .utf8),
               let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = event["type"] as? String else { return }
@@ -138,19 +188,28 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
             // Live-transcribe models stream continuously and reject VAD config;
             // whisper-style models need server VAD to segment turns. Start with
             // VAD and drop it on rejection, so new models work either way.
-            sendSessionConfig(includeVAD: model.contains("whisper"))
+            sendSessionConfig(
+                includeVAD: model.contains("whisper"),
+                connectionGeneration: connectionGeneration
+            )
 
         case "session.updated", "transcription_session.updated":
             lock.lock()
+            guard connectionGeneration == self.connectionGeneration else {
+                lock.unlock()
+                return
+            }
             ready = true
             let backlog = preRoll
             preRoll.removeAll()
             lock.unlock()
             Log.write("openai-stt: session ready, flushing \(backlog.count) pre-roll chunks")
-            for chunk in backlog { sendAudio(chunk) }
+            for chunk in backlog {
+                sendAudio(chunk, expectedConnection: connectionGeneration)
+            }
 
         case "conversation.item.input_audio_transcription.delta":
-            guard fresh(event) else { return }
+            guard fresh(event, connectionGeneration: connectionGeneration) else { return }
             let delta = (event["delta"] as? String) ?? ""
             lock.lock()
             currentPartial += delta
@@ -159,7 +218,7 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
             emit { self.onPartial?(partial) }
 
         case "conversation.item.input_audio_transcription.completed":
-            guard fresh(event) else { return }
+            guard fresh(event, connectionGeneration: connectionGeneration) else { return }
             lock.lock()
             currentPartial = ""
             lock.unlock()
@@ -174,7 +233,10 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
             if message.localizedCaseInsensitiveContains("turn detection"), !vadRetried {
                 vadRetried = true
                 Log.write("openai-stt: model rejected VAD config, retrying without — \(message)")
-                sendSessionConfig(includeVAD: false)
+                sendSessionConfig(
+                    includeVAD: false,
+                    connectionGeneration: connectionGeneration
+                )
                 return
             }
             // A commit on an empty buffer while finishing isn't worth surfacing.
@@ -191,22 +253,28 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
     }
 
     /// Discards results that belong to an utterance the user already threw away.
-    private func fresh(_ event: [String: Any]) -> Bool {
+    private func fresh(
+        _ event: [String: Any],
+        connectionGeneration: Int
+    ) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return Date() > suppressUntil.addingTimeInterval(1.0) || suppressUntil == .distantPast
+        return connectionGeneration == self.connectionGeneration
+            && (Date() > suppressUntil.addingTimeInterval(1.0) || suppressUntil == .distantPast)
     }
 
     private func completeFinish() {
         lock.lock()
         let alreadyCancelled = cancelled
         cancelled = true
+        connectionGeneration += 1
+        let retiredTask = task
+        task = nil
         // No completion event arrived for the tail — the words are on screen as
         // a partial, so the user is entitled to them as a final.
         let leftover = currentPartial.trimmingCharacters(in: .whitespacesAndNewlines)
         currentPartial = ""
         lock.unlock()
-        task?.cancel(with: .normalClosure, reason: nil)
-        task = nil
+        retiredTask?.cancel(with: .normalClosure, reason: nil)
         if !alreadyCancelled {
             emit {
                 if !leftover.isEmpty { self.onSegmentFinal?(leftover) }
@@ -222,7 +290,10 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
         DispatchQueue.main.async(execute: block)
     }
 
-    private func sendSessionConfig(includeVAD: Bool) {
+    private func sendSessionConfig(
+        includeVAD: Bool,
+        connectionGeneration: Int
+    ) {
         var input: [String: Any] = [
             "format": ["type": "audio/pcm", "rate": 24_000],
             "transcription": ["model": model],
@@ -231,22 +302,37 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
         send(["type": "session.update", "session": [
             "type": "transcription",
             "audio": ["input": input],
-        ]])
+        ]], expectedConnection: connectionGeneration)
     }
 
-    private func send(_ event: [String: Any]) {
+    private func send(
+        _ event: [String: Any],
+        expectedConnection: Int? = nil
+    ) {
         guard let data = try? JSONSerialization.data(withJSONObject: event),
               let text = String(data: data, encoding: .utf8) else { return }
-        task?.send(.string(text)) { [weak self] error in
+        lock.lock()
+        let socket = expectedConnection == nil || expectedConnection == connectionGeneration
+            ? task
+            : nil
+        let generation = connectionGeneration
+        lock.unlock()
+        socket?.send(.string(text)) { [weak self] error in
             if let error, let self {
-                self.lock.lock(); let benign = self.cancelled || self.finishing; self.lock.unlock()
+                self.lock.lock()
+                let benign = self.cancelled || self.finishing
+                    || generation != self.connectionGeneration
+                self.lock.unlock()
                 if !benign { self.reportError(EngineError.api(error.localizedDescription)) }
             }
         }
     }
 
-    private func sendAudio(_ data: Data) {
-        send(["type": "input_audio_buffer.append", "audio": data.base64EncodedString()])
+    private func sendAudio(_ data: Data, expectedConnection: Int? = nil) {
+        send(
+            ["type": "input_audio_buffer.append", "audio": data.base64EncodedString()],
+            expectedConnection: expectedConnection
+        )
     }
 
     private func reportError(_ error: Error) {

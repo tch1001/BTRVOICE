@@ -30,10 +30,13 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
 
     /// Transcript already staged when the session starts, so the editor
     /// continues the user's text instead of starting blank.
-    private let seedTranscript: String
+    private var seedTranscript: String
     private let model = "gpt-realtime-2.1"
 
     private var task: URLSessionWebSocketTask?
+    /// Identifies the socket that owns incoming events. Trash replaces the socket;
+    /// callbacks from the retired connection must never reach the fresh context.
+    private var connectionGeneration = 0
     private var converter: AVAudioConverter?
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 24_000, channels: 1, interleaved: true
@@ -84,13 +87,23 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     }
 
     func start() throws {
+        try connect()
+    }
+
+    private func connect() throws {
         guard let key = OpenAIKeyStore.read() else { throw EngineError.noKey }
         var request = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime?model=\(model)")!)
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         let socket = URLSession.shared.webSocketTask(with: request)
+        lock.lock()
+        connectionGeneration += 1
+        let generation = connectionGeneration
+        ready = false
+        suppressUnboundEventsUntil = .distantPast
         task = socket
+        lock.unlock()
         socket.resume()
-        receive()
+        receive(on: socket, generation: generation)
         Log.write("gpt-editor: connecting")
     }
 
@@ -108,27 +121,53 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
 
     func discardUtterance() {
         lock.lock()
+        let shouldReconnect = task != nil && !finishing && !cancelled
+        let retiredTask = shouldReconnect ? task : nil
         let responseInFlight = activeResponseGeneration != nil
         discardGeneration += 1
         suppressUnboundEventsUntil = Date().addingTimeInterval(1.0)
         pendingReply = ""
         rawPartial = ""
         lastTranscript = ""
+        seedTranscript = ""
+        inputGenerations.removeAll()
+        activeResponseGeneration = nil
+        pendingResponseGeneration = nil
+        if shouldReconnect {
+            // Invalidate the old receive loop before closing its socket. Audio that
+            // arrives after this point is held until the fresh session is ready.
+            connectionGeneration += 1
+            task = nil
+            ready = false
+            preRoll.removeAll()
+            errorReported = false
+            transcriptionRetried = false
+        }
         lock.unlock()
 
-        // Stop every source that could resurrect the transcript: a response already
-        // generating, audio the server has buffered but not committed, our local
-        // fallback seed, and UI callbacks that were queued before this clear.
-        if responseInFlight { send(["type": "response.cancel"]) }
-        send(["type": "input_audio_buffer.clear"])
-        send(["type": "conversation.item.create", "item": [
-            "type": "message", "role": "system",
-            "content": [["type": "input_text", "text": "The user cleared the transcript. It is now empty. Start fresh from their next speech."]],
-        ]])
+        // Clearing the server's audio buffer does not remove completed conversation
+        // items. A brand-new Realtime connection is the reliable semantic reset: it
+        // cannot remember the transcript that Trash just removed. Microphone capture
+        // continues and `append` pre-rolls audio during the short reconnect.
+        if let retiredTask {
+            retiredTask.cancel(with: .normalClosure, reason: nil)
+            do {
+                try connect()
+            } catch {
+                reportError(error)
+            }
+        } else {
+            // During finalisation the engine will be retired anyway. Keep its receive
+            // loop alive long enough to report completion, but make every old result
+            // stale through the discard generation above.
+            if responseInFlight { send(["type": "response.cancel"]) }
+            send(["type": "input_audio_buffer.clear"])
+        }
         DispatchQueue.main.async { [weak self] in
             self?.rescueTimer?.invalidate()
             self?.onReplacementPreview?(nil)
             self?.onPartial?("")
+            if shouldReconnect { self?.onStatus?("Editor context cleared — reconnecting") }
         }
     }
 
@@ -149,17 +188,23 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     func cancel() {
         lock.lock()
         cancelled = true
+        connectionGeneration += 1
+        let retiredTask = task
+        task = nil
         lock.unlock()
         DispatchQueue.main.async { self.rescueTimer?.invalidate() }
-        task?.cancel(with: .normalClosure, reason: nil)
-        task = nil
+        retiredTask?.cancel(with: .normalClosure, reason: nil)
     }
 
     // MARK: - WebSocket
 
-    private func receive() {
-        task?.receive { [weak self] result in
+    private func receive(on socket: URLSessionWebSocketTask, generation: Int) {
+        socket.receive { [weak self] result in
             guard let self else { return }
+            self.lock.lock()
+            let isCurrentConnection = generation == self.connectionGeneration
+            self.lock.unlock()
+            guard isCurrentConnection else { return }
             switch result {
             case .failure(let error):
                 self.lock.lock()
@@ -168,25 +213,29 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                 if !benign { self.reportError(EngineError.api(error.localizedDescription)) }
                 return
             case .success(.string(let text)):
-                self.handle(text)
+                self.handle(text, connectionGeneration: generation)
             case .success:
                 break
             }
-            self.receive()
+            self.receive(on: socket, generation: generation)
         }
     }
 
-    private func handle(_ text: String) {
+    private func handle(_ text: String, connectionGeneration: Int) {
+        guard connectionIsCurrent(connectionGeneration) else { return }
         guard let data = text.data(using: .utf8),
               let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = event["type"] as? String else { return }
 
         switch type {
         case "session.created":
-            sendSessionConfig(withInputTranscription: true)
+            sendSessionConfig(
+                withInputTranscription: true,
+                connectionGeneration: connectionGeneration
+            )
 
         case "session.updated":
-            handleSessionReady()
+            handleSessionReady(connectionGeneration: connectionGeneration)
 
         case "conversation.item.input_audio_transcription.delta":
             // Live feedback while the user is still speaking: raw recognition
@@ -247,17 +296,24 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             emitTranscript(for: generation) { self.onReplacementPreview?(preview) }
 
         case "response.done":
-            handleResponseDone(event)
+            handleResponseDone(event, connectionGeneration: connectionGeneration)
 
         case "error":
-            handleErrorEvent(event, raw: text)
+            handleErrorEvent(
+                event,
+                raw: text,
+                connectionGeneration: connectionGeneration
+            )
 
         default:
             break
         }
     }
 
-    private func sendSessionConfig(withInputTranscription: Bool) {
+    private func sendSessionConfig(
+        withInputTranscription: Bool,
+        connectionGeneration: Int
+    ) {
         var input: [String: Any] = [
             "format": ["type": "audio/pcm", "rate": 24_000],
             "turn_detection": ["type": "server_vad"],
@@ -338,31 +394,48 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
                         ],
                     ],
                 ],
-        ]])
+        ]], expectedConnection: connectionGeneration)
     }
 
-    private func handleSessionReady() {
-        if !seedTranscript.isEmpty {
+    private func handleSessionReady(connectionGeneration: Int) {
+        lock.lock()
+        guard connectionGeneration == self.connectionGeneration else {
+            lock.unlock()
+            return
+        }
+        let sessionSeed = seedTranscript
+        lock.unlock()
+        if !sessionSeed.isEmpty {
             send(["type": "conversation.item.create", "item": [
                 "type": "message", "role": "system",
-                "content": [["type": "input_text", "text": "The transcript currently reads: \(seedTranscript)"]],
-            ]])
+                "content": [["type": "input_text", "text": "The transcript currently reads: \(sessionSeed)"]],
+            ]], expectedConnection: connectionGeneration)
         }
         lock.lock()
+        guard connectionGeneration == self.connectionGeneration else {
+            lock.unlock()
+            return
+        }
         ready = true
         let backlog = preRoll
         preRoll.removeAll()
         lock.unlock()
         Log.write("gpt-editor: session ready")
         EditorActivityLog.post(.info, "Session ready — editor is listening"
-            + (seedTranscript.isEmpty ? "" : " (seeded with the staged transcript)"))
+            + (sessionSeed.isEmpty ? "" : " (seeded with the staged transcript)"))
         emit { self.onStatus?("Editor listening") }
         for chunk in backlog {
-            send(["type": "input_audio_buffer.append", "audio": chunk.base64EncodedString()])
+            send(
+                ["type": "input_audio_buffer.append", "audio": chunk.base64EncodedString()],
+                expectedConnection: connectionGeneration
+            )
         }
     }
 
-    private func handleResponseDone(_ event: [String: Any]) {
+    private func handleResponseDone(
+        _ event: [String: Any],
+        connectionGeneration: Int
+    ) {
         lock.lock()
         let responseGeneration = activeResponseGeneration ?? generationForUnboundEventLocked()
         activeResponseGeneration = nil
@@ -422,7 +495,9 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             if stillFinishing { completeFinish() }
             return
         }
-        for item in functionCalls { handleFunctionCall(item) }
+        for item in functionCalls {
+            handleFunctionCall(item, connectionGeneration: connectionGeneration)
+        }
         if !cleaned.isEmpty {
             lock.lock()
             if responseGeneration == discardGeneration { lastTranscript = cleaned }
@@ -438,7 +513,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         }
         if calledTool {
             // Let the model continue (it usually re-emits the transcript next).
-            send(["type": "response.create"])
+            send(["type": "response.create"], expectedConnection: connectionGeneration)
         } else if stillFinishing {
             completeFinish()
         }
@@ -481,14 +556,21 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         onSegmentFinal?(rescued)
     }
 
-    private func handleErrorEvent(_ event: [String: Any], raw text: String) {
+    private func handleErrorEvent(
+        _ event: [String: Any],
+        raw text: String,
+        connectionGeneration: Int
+    ) {
         let message = (event["error"] as? [String: Any])?["message"] as? String ?? text
         // If the input-transcription config is what the API rejected, retry
         // without it — live speech feedback is a nicety, not the feature.
         if message.localizedCaseInsensitiveContains("transcription"), !transcriptionRetried {
             transcriptionRetried = true
             Log.write("gpt-editor: transcription config rejected, retrying without — \(message)")
-            sendSessionConfig(withInputTranscription: false)
+            sendSessionConfig(
+                withInputTranscription: false,
+                connectionGeneration: connectionGeneration
+            )
             return
         }
         lock.lock(); let benign = finishing || cancelled; lock.unlock()
@@ -504,7 +586,10 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     }
 
     /// The editor called one of its tools: saving a rule, or staging an app action.
-    private func handleFunctionCall(_ item: [String: Any]) {
+    private func handleFunctionCall(
+        _ item: [String: Any],
+        connectionGeneration: Int
+    ) {
         guard let name = item["name"] as? String,
               let callID = item["call_id"] as? String else { return }
         let args: [String: Any] = {
@@ -570,7 +655,7 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
             "type": "function_call_output",
             "call_id": callID,
             "output": output,
-        ]])
+        ]], expectedConnection: connectionGeneration)
     }
 
     private static func editorInstructions() -> String {
@@ -630,9 +715,11 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         lock.lock()
         let alreadyCancelled = cancelled
         cancelled = true
-        lock.unlock()
-        task?.cancel(with: .normalClosure, reason: nil)
+        connectionGeneration += 1
+        let retiredTask = task
         task = nil
+        lock.unlock()
+        retiredTask?.cancel(with: .normalClosure, reason: nil)
         if !alreadyCancelled {
             emit {
                 self.rescueTimer?.invalidate()
@@ -644,12 +731,24 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
         }
     }
 
-    private func send(_ event: [String: Any]) {
+    private func send(
+        _ event: [String: Any],
+        expectedConnection: Int? = nil
+    ) {
         guard let data = try? JSONSerialization.data(withJSONObject: event),
               let text = String(data: data, encoding: .utf8) else { return }
-        task?.send(.string(text)) { [weak self] error in
+        lock.lock()
+        let socket = expectedConnection == nil || expectedConnection == connectionGeneration
+            ? task
+            : nil
+        let generation = connectionGeneration
+        lock.unlock()
+        socket?.send(.string(text)) { [weak self] error in
             if let error, let self {
-                self.lock.lock(); let benign = self.cancelled || self.finishing; self.lock.unlock()
+                self.lock.lock()
+                let benign = self.cancelled || self.finishing
+                    || generation != self.connectionGeneration
+                self.lock.unlock()
                 if !benign { self.reportError(EngineError.api(error.localizedDescription)) }
             }
         }
@@ -687,6 +786,11 @@ final class OpenAIEditorEngine: NSObject, TranscriptionEngine {
     private func generationIsCurrent(_ generation: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return generation == discardGeneration
+    }
+
+    private func connectionIsCurrent(_ generation: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return generation == connectionGeneration
     }
 
     /// Drops transcript mutations that were queued on the main thread before Trash
