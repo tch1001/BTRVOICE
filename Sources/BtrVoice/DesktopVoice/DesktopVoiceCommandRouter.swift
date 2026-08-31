@@ -19,13 +19,68 @@ struct DesktopVoicePlan: Equatable {
     let actions: [DesktopVoiceAction]
 }
 
+/// User-facing metadata for one deterministic command family. The router and the
+/// assistant both read this registry so BtrVoice can accurately explain itself.
+struct DesktopVoiceFastPath: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let action: String
+    let examples: [String]
+
+    var promptLine: String {
+        let spoken = examples.map { "“\($0)”" }.joined(separator: ", ")
+        return "- \(title): \(action). Examples: \(spoken)"
+    }
+}
+
 enum DesktopVoiceRouteResult: Equatable {
     case plan(DesktopVoicePlan)
+    case answer(String)
     case unsupported(String)
 }
 
 struct DesktopVoiceCommandRouter {
     typealias ApplicationResolver = (String) -> DesktopVoiceApplicationTarget?
+
+    private struct ShortcutRule {
+        let definition: DesktopVoiceFastPath
+        let commands: Set<String>
+        let summary: String
+        let combo: String
+    }
+
+    static let fastPaths: [DesktopVoiceFastPath] = [
+        DesktopVoiceFastPath(
+            id: "open-application",
+            title: "Open an application",
+            action: "Find and activate an installed macOS application",
+            examples: ["Open Telegram", "Launch Notes", "Start the browser"]
+        ),
+        DesktopVoiceFastPath(
+            id: "open-application-new-tab",
+            title: "Open an application and create a tab",
+            action: "Open the application, then press Command-T",
+            examples: ["Open Brave and create a new tab", "Start the browser then open a new tab"]
+        ),
+    ] + shortcutRules.map(\.definition)
+
+    static var assistantContext: String {
+        fastPaths.map(\.promptLine).joined(separator: "\n")
+    }
+
+    static var helpAnswer: String {
+        let rows = fastPaths.enumerated().map { index, path in
+            let spoken = path.examples.map { "“\($0)”" }.joined(separator: ", ")
+            return "\(index + 1). \(path.title) — \(path.action). Say: \(spoken)"
+        }
+        return (["I currently have \(fastPaths.count) local fast paths:"] + rows + [
+            "You can also ask how to use BtrVoice. Commands outside this list go to the model-backed slow path.",
+        ]).joined(separator: "\n")
+    }
+
+    static let addingFastPathsAnswer = """
+    Fast paths are currently built into DesktopVoiceCommandRouter.swift; there is no in-app Add Command button yet. Each shortcut family has one registry entry containing its name, examples, summary, and allowlisted key combination. Because routing and self-description read the same registry, a new entry appears in this command list automatically.
+    """
 
     private let resolveApplication: ApplicationResolver
 
@@ -39,20 +94,16 @@ struct DesktopVoiceCommandRouter {
             return .unsupported("I didn't hear a command.")
         }
 
-        if Self.newTabCommands.contains(command) {
-            return shortcutPlan(summary: "Create a new tab", combo: "cmd+t")
+        if Self.isAddingFastPathQuestion(command) {
+            return .answer(Self.addingFastPathsAnswer)
         }
-        if Self.closeTabCommands.contains(command) {
-            return shortcutPlan(summary: "Close the current tab", combo: "cmd+w")
+
+        if Self.isHelpQuestion(command) {
+            return .answer(Self.helpAnswer)
         }
-        if Self.reloadCommands.contains(command) {
-            return shortcutPlan(summary: "Reload the current page", combo: "cmd+r")
-        }
-        if Self.backCommands.contains(command) {
-            return shortcutPlan(summary: "Go back", combo: "cmd+[")
-        }
-        if Self.forwardCommands.contains(command) {
-            return shortcutPlan(summary: "Go forward", combo: "cmd+]")
+
+        for rule in Self.shortcutRules where rule.commands.contains(command) {
+            return shortcutPlan(summary: rule.summary, combo: rule.combo)
         }
 
         guard let remainder = Self.strippingLaunchVerb(from: command) else {
@@ -83,6 +134,27 @@ struct DesktopVoiceCommandRouter {
     }
 
     private static let launchVerbs = ["open ", "launch ", "start "]
+
+    private static func isHelpQuestion(_ command: String) -> Bool {
+        if helpCommands.contains(command) { return true }
+        let asksToInspect = command.contains("list")
+            || command.contains("show")
+            || command.contains("look")
+            || command.contains("inspect")
+            || command.contains("what")
+            || command.contains("which")
+            || command.contains("tell me")
+        return asksToInspect
+            && (command.contains("fast path")
+                || command.contains("commands")
+                || command.contains("can you do")
+                || command.contains("capabilities"))
+    }
+
+    private static func isAddingFastPathQuestion(_ command: String) -> Bool {
+        (command.contains("add") || command.contains("create") || command.contains("make"))
+            && (command.contains("fast path") || command.contains("new command"))
+    }
 
     private static func strippingLaunchVerb(from command: String) -> String? {
         for verb in launchVerbs where command.hasPrefix(verb) {
@@ -127,19 +199,66 @@ struct DesktopVoiceCommandRouter {
             .joined(separator: " ")
     }
 
-    private static let newTabCommands: Set<String> = [
-        "new tab", "open new tab", "open a new tab", "create new tab", "create a new tab",
+    private static let helpCommands: Set<String> = [
+        "help", "what can you do", "how do i use this", "how do i use voice control",
+        "list commands", "show commands", "list fast paths", "show fast paths",
     ]
-    private static let closeTabCommands: Set<String> = [
-        "close tab", "close the tab", "close this tab", "close current tab", "close the current tab",
-    ]
-    private static let reloadCommands: Set<String> = [
-        "reload", "reload page", "reload the page", "refresh", "refresh page", "refresh the page",
-    ]
-    private static let backCommands: Set<String> = [
-        "back", "go back", "browser back",
-    ]
-    private static let forwardCommands: Set<String> = [
-        "forward", "go forward", "browser forward",
+
+    private static let shortcutRules: [ShortcutRule] = [
+        ShortcutRule(
+            definition: DesktopVoiceFastPath(
+                id: "new-tab",
+                title: "Create a new tab",
+                action: "Press Command-T in the target application",
+                examples: ["New tab", "Open a new tab", "Create a new tab"]
+            ),
+            commands: ["new tab", "open new tab", "open a new tab", "create new tab", "create a new tab"],
+            summary: "Create a new tab",
+            combo: "cmd+t"
+        ),
+        ShortcutRule(
+            definition: DesktopVoiceFastPath(
+                id: "close-tab",
+                title: "Close the current tab",
+                action: "Press Command-W in the target application",
+                examples: ["Close tab", "Close this tab", "Close the current tab"]
+            ),
+            commands: ["close tab", "close the tab", "close this tab", "close current tab", "close the current tab"],
+            summary: "Close the current tab",
+            combo: "cmd+w"
+        ),
+        ShortcutRule(
+            definition: DesktopVoiceFastPath(
+                id: "reload",
+                title: "Reload the current page",
+                action: "Press Command-R in the target application",
+                examples: ["Reload", "Reload the page", "Refresh the page"]
+            ),
+            commands: ["reload", "reload page", "reload the page", "refresh", "refresh page", "refresh the page"],
+            summary: "Reload the current page",
+            combo: "cmd+r"
+        ),
+        ShortcutRule(
+            definition: DesktopVoiceFastPath(
+                id: "back",
+                title: "Go back",
+                action: "Press Command-[ in the target application",
+                examples: ["Back", "Go back", "Browser back"]
+            ),
+            commands: ["back", "go back", "browser back"],
+            summary: "Go back",
+            combo: "cmd+["
+        ),
+        ShortcutRule(
+            definition: DesktopVoiceFastPath(
+                id: "forward",
+                title: "Go forward",
+                action: "Press Command-] in the target application",
+                examples: ["Forward", "Go forward", "Browser forward"]
+            ),
+            commands: ["forward", "go forward", "browser forward"],
+            summary: "Go forward",
+            combo: "cmd+]"
+        ),
     ]
 }

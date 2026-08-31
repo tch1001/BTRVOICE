@@ -12,6 +12,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
         case idle
         case connecting
         case listening
+        case thinking
         case executing
         case failed
     }
@@ -19,6 +20,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
     struct Activity: Identifiable, Equatable {
         enum Kind: Equatable {
             case heard
+            case answer
             case plan
             case success
             case notice
@@ -38,16 +40,22 @@ final class DesktopVoiceCoordinator: ObservableObject {
     @Published private(set) var targetName: String?
     @Published private(set) var activities: [Activity] = []
 
-    var isListening: Bool { phase == .connecting || phase == .listening || phase == .executing }
+    var isListening: Bool {
+        phase == .connecting || phase == .listening || phase == .thinking || phase == .executing
+    }
 
     private let audio = AudioCapture()
     private let executor = DesktopVoiceExecutor()
     private lazy var router = DesktopVoiceCommandRouter { phrase in
         DesktopApplicationResolver.shared.resolve(phrase)
     }
+    private lazy var assistant = DesktopVoiceAssistant { phrase in
+        DesktopApplicationResolver.shared.resolve(phrase)
+    }
     private var engine: TranscriptionEngine?
     private var queuedCommands: [String] = []
     private var commandIsExecuting = false
+    private var slowPathTask: Task<Void, Never>?
     /// GPT Live Transcribe prioritizes low-latency deltas and can leave a short
     /// command visible without a segment-final event. Once a complete fast-path
     /// command has been stable for a brief pause, promote it ourselves.
@@ -112,6 +120,8 @@ final class DesktopVoiceCoordinator: ObservableObject {
     func stop() {
         autoSubmitTimer?.invalidate()
         autoSubmitTimer = nil
+        slowPathTask?.cancel()
+        slowPathTask = nil
         audio.stop()
         engine?.cancel()
         engine = nil
@@ -156,14 +166,22 @@ final class DesktopVoiceCoordinator: ObservableObject {
     func clearActivity() {
         autoSubmitTimer?.invalidate()
         autoSubmitTimer = nil
+        let wasThinking = phase == .thinking
+        slowPathTask?.cancel()
+        slowPathTask = nil
+        queuedCommands.removeAll()
         activities.removeAll()
         partialTranscript = ""
         // The visible partial mirrors the transcriber's in-flight utterance. Clear
         // both sides so the next audio delta starts at DEF rather than restoring
         // discarded speech as ABCDEF.
         engine?.discardUtterance()
+        if wasThinking {
+            commandIsExecuting = false
+            restoreListeningPhase()
+        }
         status = isListening ? "Listening for a command" : "Ready for a command"
-        Log.write("desktop-voice: cleared activity and current utterance")
+        Log.write("desktop-voice: cleared activity, conversation, and current utterance")
     }
 
     private func beginListening() {
@@ -198,7 +216,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
             self?.fail(error.localizedDescription)
         }
         engine.onStatus = { [weak self] message in
-            guard let self, self.phase != .executing else { return }
+            guard let self, self.phase != .thinking, self.phase != .executing else { return }
             self.status = message
         }
 
@@ -217,7 +235,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
             try audio.start()
             phase = .listening
             status = "Listening for a command"
-            append(.notice, "Voice control started", detail: "Fast commands run locally; unfamiliar commands remain visible for future routing.")
+            append(.notice, "Voice control started", detail: "Fast commands run locally; unfamiliar commands and questions use the model-backed slow path.")
             Log.write("desktop-voice: listening with shared OpenAI key")
         } catch {
             engine.cancel()
@@ -235,37 +253,83 @@ final class DesktopVoiceCoordinator: ObservableObject {
 
         switch router.route(command) {
         case .unsupported(let reason):
-            append(.notice, "Not in the fast path yet", detail: reason)
-            status = reason
-            commandIsExecuting = false
-            restoreListeningPhase()
-            processNextCommandIfNeeded()
+            runSlowPath(command, fastPathReason: reason)
+
+        case .answer(let answer):
+            append(.answer, answer, detail: "Local capability registry")
+            status = "Answered locally"
+            finishCurrentCommand()
 
         case .plan(let plan):
-            phase = .executing
-            status = plan.summary
-            append(.plan, plan.summary, detail: "Local fast path")
-            let started = CFAbsoluteTimeGetCurrent()
-            executor.execute(plan, preferredTarget: lastExternalApplication) { [weak self] result in
-                guard let self else { return }
-                self.commandIsExecuting = false
-                switch result {
-                case .success(let outcome):
-                    if let target = outcome.target { self.rememberTarget(target) }
-                    let milliseconds = Int((CFAbsoluteTimeGetCurrent() - started) * 1_000)
-                    self.append(.success, outcome.message, detail: "Dispatched in \(milliseconds) ms")
-                    self.status = outcome.message
-                case .failure(let error):
-                    self.append(.failure, "Command failed", detail: error.localizedDescription)
-                    self.status = error.localizedDescription
-                    if case DesktopVoiceExecutionError.accessibilityRequired = error {
-                        Permissions.requestAccessibility()
-                    }
+            execute(plan, source: "Local fast path")
+        }
+    }
+
+    private func runSlowPath(_ command: String, fastPathReason: String) {
+        phase = .thinking
+        status = "Thinking…"
+        append(.notice, "Checking the slow path", detail: fastPathReason)
+        let context = DesktopVoiceAssistant.Context(
+            targetName: targetName,
+            recentActivity: activities.suffix(12).map(Self.contextLine)
+        )
+
+        slowPathTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let decision = try await self.assistant.respond(to: command, context: context)
+                guard !Task.isCancelled else { return }
+                self.slowPathTask = nil
+                switch decision {
+                case .answer(let answer):
+                    self.append(.answer, answer, detail: "Model slow path")
+                    self.status = "Answered"
+                    self.finishCurrentCommand()
+                case .plan(let plan):
+                    self.execute(plan, source: "Model slow path")
+                case .unsupported(let reason):
+                    self.append(.notice, "I can't do that yet", detail: reason)
+                    self.status = reason
+                    self.finishCurrentCommand()
                 }
-                self.restoreListeningPhase()
-                self.processNextCommandIfNeeded()
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.slowPathTask = nil
+                self.append(.failure, "Slow path unavailable", detail: error.localizedDescription)
+                self.status = error.localizedDescription
+                self.finishCurrentCommand()
             }
         }
+    }
+
+    private func execute(_ plan: DesktopVoicePlan, source: String) {
+        phase = .executing
+        status = plan.summary
+        append(.plan, plan.summary, detail: source)
+        let started = CFAbsoluteTimeGetCurrent()
+        executor.execute(plan, preferredTarget: lastExternalApplication) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let outcome):
+                if let target = outcome.target { self.rememberTarget(target) }
+                let milliseconds = Int((CFAbsoluteTimeGetCurrent() - started) * 1_000)
+                self.append(.success, outcome.message, detail: "Dispatched in \(milliseconds) ms")
+                self.status = outcome.message
+            case .failure(let error):
+                self.append(.failure, "Command failed", detail: error.localizedDescription)
+                self.status = error.localizedDescription
+                if case DesktopVoiceExecutionError.accessibilityRequired = error {
+                    Permissions.requestAccessibility()
+                }
+            }
+            self.finishCurrentCommand()
+        }
+    }
+
+    private func finishCurrentCommand() {
+        commandIsExecuting = false
+        restoreListeningPhase()
+        processNextCommandIfNeeded()
     }
 
     private func receivePartial(_ transcript: String) {
@@ -274,17 +338,20 @@ final class DesktopVoiceCoordinator: ObservableObject {
         autoSubmitTimer = nil
 
         let command = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty, isFastPathCommand(command) else { return }
+        guard !command.isEmpty else { return }
 
-        // Long enough to distinguish successive streaming deltas, short enough
-        // that a familiar command visibly reacts within roughly one second.
-        autoSubmitTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: false) {
+        let fastPath = isFastPathCommand(command)
+        let delay = fastPath ? 0.55 : 1.15
+
+        // Familiar commands stay sub-second. Questions and novel commands wait a
+        // little longer for natural speech, then enter the interactive slow path.
+        autoSubmitTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) {
             [weak self] _ in
             guard let self else { return }
             let stillVisible = self.partialTranscript
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard stillVisible == command else { return }
-            self.submitCurrentPartial(fastPathOnly: true)
+            self.submitCurrentPartial(fastPathOnly: fastPath)
         }
     }
 
@@ -302,8 +369,10 @@ final class DesktopVoiceCoordinator: ObservableObject {
 
     private func isFastPathCommand(_ command: String) -> Bool {
         if Self.isStopCommand(command) { return true }
-        if case .plan = router.route(command) { return true }
-        return false
+        switch router.route(command) {
+        case .plan, .answer: return true
+        case .unsupported: return false
+        }
     }
 
     private func restoreListeningPhase() {
@@ -325,9 +394,25 @@ final class DesktopVoiceCoordinator: ObservableObject {
         }
     }
 
+    private static func contextLine(_ activity: Activity) -> String {
+        let kind: String
+        switch activity.kind {
+        case .heard: kind = "user"
+        case .answer: kind = "assistant"
+        case .plan: kind = "plan"
+        case .success: kind = "result"
+        case .notice: kind = "notice"
+        case .failure: kind = "failure"
+        }
+        let detail = activity.detail.map { " — \($0)" } ?? ""
+        return "\(kind): \(activity.title)\(detail)"
+    }
+
     private func fail(_ message: String) {
         autoSubmitTimer?.invalidate()
         autoSubmitTimer = nil
+        slowPathTask?.cancel()
+        slowPathTask = nil
         audio.stop()
         engine?.cancel()
         engine = nil

@@ -106,9 +106,9 @@ private struct DesktopVoicePanelView: View {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if coordinator.activities.isEmpty, coordinator.partialTranscript.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("Try “Open the browser”", systemImage: "bolt.fill")
+                            Label("Try “What can you do?”", systemImage: "text.bubble.fill")
                                 .font(.system(size: 13, weight: .semibold))
-                            Text("Also try “Open Brave and create a new tab.” Familiar commands run through the native fast path.")
+                            Text("Or say “Open Brave and create a new tab.” Familiar commands run locally; questions use the interactive slow path.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -179,7 +179,7 @@ private struct DesktopVoicePanelView: View {
 
     private var commandBar: some View {
         HStack(spacing: 8) {
-            TextField("Type a command without using the microphone", text: $manualCommand)
+            TextField("Type a command or ask a question", text: $manualCommand)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { submitManualCommand() }
             Button {
@@ -195,7 +195,7 @@ private struct DesktopVoicePanelView: View {
                     && coordinator.partialTranscript
                         .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             )
-            .help("Immediately run the typed command or the visible live transcript")
+            .help("Immediately run or ask using the typed text or visible live transcript")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -220,6 +220,7 @@ private struct DesktopVoicePanelView: View {
     private func symbol(for kind: DesktopVoiceCoordinator.Activity.Kind) -> String {
         switch kind {
         case .heard: return "quote.bubble"
+        case .answer: return "text.bubble.fill"
         case .plan: return "bolt.fill"
         case .success: return "checkmark.circle.fill"
         case .notice: return "info.circle"
@@ -230,6 +231,7 @@ private struct DesktopVoicePanelView: View {
     private func color(for kind: DesktopVoiceCoordinator.Activity.Kind) -> Color {
         switch kind {
         case .heard, .notice: return .secondary
+        case .answer: return .accentColor
         case .plan: return .accentColor
         case .success: return .green
         case .failure: return .orange

@@ -116,13 +116,14 @@ enum SelfTest {
                 bundleIdentifier: "ru.keepcoder.Telegram",
                 applicationURL: URL(fileURLWithPath: "/Applications/Telegram.app")
             )
-            let router = DesktopVoiceCommandRouter { name in
+            let resolveApplication: DesktopVoiceCommandRouter.ApplicationResolver = { name in
                 switch name {
                 case "browser", "brave": return brave
                 case "telegram": return telegram
                 default: return nil
                 }
             }
+            let router = DesktopVoiceCommandRouter(resolveApplication: resolveApplication)
 
             check(
                 "semantic browser alias resolves to the preferred application",
@@ -157,6 +158,78 @@ enum SelfTest {
             } else {
                 check("unknown goals stay out of the deterministic fast path", false)
             }
+            let fastPathIDs = DesktopVoiceCommandRouter.fastPaths.map(\.id)
+            check("the introspectable command registry has seven fast paths",
+                  fastPathIDs.count == 7)
+            check("fast path registry identifiers are unique",
+                  Set(fastPathIDs).count == fastPathIDs.count)
+            if case .answer(let answer) = router.route("What fast path commands do you have?") {
+                check("voice control can list its own commands",
+                      answer.contains("7 local fast paths")
+                        && answer.contains("Create a new tab")
+                        && answer.contains("Open a new tab"),
+                      answer)
+            } else {
+                check("voice control can list its own commands", false)
+            }
+            check("voice control explains how its fast paths are extended",
+                  router.route("How do I add a new fast path command?")
+                    == .answer(DesktopVoiceCommandRouter.addingFastPathsAnswer))
+
+            let answerBody: [String: Any] = [
+                "output": [[
+                    "type": "message",
+                    "content": [[
+                        "type": "output_text",
+                        "text": "Hard Submit sends the current command immediately.",
+                    ]],
+                ]] as [[String: Any]],
+            ]
+            let answerDecision = try? DesktopVoiceAssistant.interpret(
+                answerBody,
+                resolveApplication: resolveApplication
+            )
+            check("the slow path reads conversational answers",
+                  answerDecision == .answer("Hard Submit sends the current command immediately."))
+
+            let planBody: [String: Any] = [
+                "output": [[
+                    "type": "function_call",
+                    "name": "run_desktop_plan",
+                    "arguments": """
+                    {"summary":"Open Brave and create a tab","actions":[
+                      {"type":"open_application","application":"brave","shortcut":null},
+                      {"type":"shortcut","application":null,"shortcut":"new_tab"}
+                    ]}
+                    """,
+                ]] as [[String: Any]],
+            ]
+            let planDecision = try? DesktopVoiceAssistant.interpret(
+                planBody,
+                resolveApplication: resolveApplication
+            )
+            check("the slow path compiles model tool calls into typed actions",
+                  planDecision == .plan(DesktopVoicePlan(
+                    summary: "Open Brave and create a tab",
+                    actions: [.openApplication(brave), .pressShortcut("cmd+t")]
+                  )))
+
+            let unsafeBody: [String: Any] = [
+                "output": [[
+                    "type": "function_call",
+                    "name": "run_desktop_plan",
+                    "arguments": """
+                    {"summary":"Run an unsafe shortcut","actions":[
+                      {"type":"shortcut","application":null,"shortcut":"delete_everything"}
+                    ]}
+                    """,
+                ]] as [[String: Any]],
+            ]
+            check("the slow path rejects shortcuts outside its allowlist",
+                  (try? DesktopVoiceAssistant.interpret(
+                    unsafeBody,
+                    resolveApplication: resolveApplication
+                  )) == nil)
         }
 
         print("Inputs")
