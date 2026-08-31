@@ -59,9 +59,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         dictate.keyEquivalentModifierMask = [.option]
         menu.addItem(dictate)
 
-        // The fleet's Jarvis — a separate window, a separate pipeline. Deliberately
-        // additive: nothing about dictation changes whether this is used or not.
-        menu.addItem(item("Start Jarvis", action: #selector(startJarvis)))
+        // Inspect the app that was active before BtrVoice presents its own window.
+        // Keeping this second makes the new surface as immediate as dictation.
+        menu.addItem(item("Start Computer Use", action: #selector(startComputerUse)))
 
         // An on-screen keyboard, like macOS's Accessibility Keyboard: clickable keys
         // that type into whatever app has focus.
@@ -71,7 +71,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         ))
 
         // Everything else buffer-related lives in the panel UI — the menu stays
-        // minimal: dictate, Jarvis, settings, health.
+        // minimal: dictate, Computer Use, settings, health.
         menu.addItem(.separator())
         menu.addItem(jarvisItem())
         menu.addItem(inputsItem())
@@ -329,8 +329,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func toggleDictation() { controller.toggleDictation() }
 
-    @objc private func startJarvis() {
-        DispatchQueue.main.async { JarvisSurfaceWindowController.shared.show() }
+    @objc private func startComputerUse() {
+        let target = NSWorkspace.shared.frontmostApplication
+        DispatchQueue.main.async {
+            ComputerUseWindowController.shared.show(target: target)
+        }
     }
 
     @objc private func toggleVirtualKeyboard() {

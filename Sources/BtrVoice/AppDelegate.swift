@@ -53,6 +53,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_JARVIS"] == "1" {
             DispatchQueue.main.async { JarvisSurfaceWindowController.shared.show() }
         }
+        // Dev hook: open the Computer Use inventory against whichever app was active
+        // while BtrVoice launched.
+        if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_COMPUTER_USE"] == "1" {
+            let target = NSWorkspace.shared.frontmostApplication
+            DispatchQueue.main.async {
+                ComputerUseWindowController.shared.show(target: target)
+            }
+        }
         // Dev hook: start a listening session immediately, so the engine pipeline can
         // be exercised headlessly.
         if ProcessInfo.processInfo.environment["BTRVOICE_AUTOSTART"] == "1" {
