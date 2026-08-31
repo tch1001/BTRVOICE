@@ -5,6 +5,8 @@ import SwiftUI
 /// mirrors dictation's screen-level presence while keeping focus in the app the
 /// user intends to control.
 private struct DesktopVoicePanelView: View {
+    private static let activityBottomID = "desktop-voice-activity-bottom"
+
     @ObservedObject var coordinator: DesktopVoiceCoordinator
     @State private var manualCommand = ""
 
@@ -99,39 +101,56 @@ private struct DesktopVoicePanelView: View {
     }
 
     private var activity: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                if coordinator.activities.isEmpty, coordinator.partialTranscript.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Try “Open the browser”", systemImage: "bolt.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("Also try “Open Brave and create a new tab.” Familiar commands run through the native fast path.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if coordinator.activities.isEmpty, coordinator.partialTranscript.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Try “Open the browser”", systemImage: "bolt.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Also try “Open Brave and create a new tab.” Familiar commands run through the native fast path.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-                }
 
-                ForEach(coordinator.activities) { entry in
-                    activityRow(entry)
-                }
-
-                if !coordinator.partialTranscript.isEmpty {
-                    HStack(alignment: .top, spacing: 9) {
-                        Image(systemName: "waveform")
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16)
-                        Text(coordinator.partialTranscript)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(coordinator.activities) { entry in
+                        activityRow(entry)
                     }
-                    .padding(9)
-                    .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+
+                    if !coordinator.partialTranscript.isEmpty {
+                        HStack(alignment: .top, spacing: 9) {
+                            Image(systemName: "waveform")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16)
+                            Text(coordinator.partialTranscript)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(9)
+                        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.activityBottomID)
+                }
+                .padding(12)
+            }
+            .onAppear {
+                proxy.scrollTo(Self.activityBottomID, anchor: .bottom)
+            }
+            .onChange(of: coordinator.activities.last?.id) {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    proxy.scrollTo(Self.activityBottomID, anchor: .bottom)
                 }
             }
-            .padding(12)
+            .onChange(of: coordinator.partialTranscript) {
+                proxy.scrollTo(Self.activityBottomID, anchor: .bottom)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Activity is read-only, so the entire body is useful window chrome. The
