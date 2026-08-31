@@ -1,0 +1,492 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A41C944B92D37FA51A09F1B /* BtrVoiceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B5AE0EF44B665113F7774C7 /* BtrVoiceApp.swift */; };
+		13AC900373FB5C3F424B7F3F /* OpenAIRealtimeAudioSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DA2E1365A30F4AFA75CB985 /* OpenAIRealtimeAudioSession.swift */; };
+		4105079F4DBB44EA3832575D /* BetterVoiceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2992FFD0218876F7A073E5D1 /* BetterVoiceSettingsView.swift */; };
+		413FE3A6AB21E1A8314F34E1 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = A0B174816E4C3944A17EAB9E /* AppIcon60x60@3x.png */; };
+		6D70528BEB53BFAEE0EF1B62 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C59BB02DB73ECD8553C70D9C /* KeyboardViewController.swift */; };
+		7CEE5259541DF8132F064CC5 /* BtrVoiceKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BEDF70215DB1A99B20F64E36 /* BtrVoiceKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A23D3E4EA7E1924D4F492F40 /* BetterVoiceRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B8102173673EA4EE47C0461 /* BetterVoiceRules.swift */; };
+		B902B6F9B6C2139C007621C3 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9FCE8F8FEAA306F2B9F636B /* ContentView.swift */; };
+		C553F8F7101AF39BF9BFCAED /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 585B66546EECCEF32940F06D /* AppIcon60x60@2x.png */; };
+		CC008CE31A6B192369023BCA /* OpenAIKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D22B8CB7DA78B28CB57B482 /* OpenAIKeyStore.swift */; };
+		CFBD1FDA707DC125102FDF00 /* AppIcon76x76@2x~ipad.png in Resources */ = {isa = PBXBuildFile; fileRef = 2450C234546BBB2A7B161A06 /* AppIcon76x76@2x~ipad.png */; };
+		DE5E62F9001FE9CAFFAF2D4F /* SpeechTranscriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = 178AFE3701FE599EF6820511 /* SpeechTranscriber.swift */; };
+		E5C032CAE254C03E13D2281D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 83EFB564A0FF23392131C717 /* Assets.xcassets */; };
+		F3D259D93B40695E82108D6C /* SharedTranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C62B9C85E0CAC43EEC0210B /* SharedTranscriptStore.swift */; };
+		F9630471EADD86397E52444F /* SharedTranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C62B9C85E0CAC43EEC0210B /* SharedTranscriptStore.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1527AFD4A6567629332FC5EB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1F6921DC1C0B01D2E7E34821 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F463F04E39E2AE8711FE946C;
+			remoteInfo = BtrVoiceKeyboard;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		34D1A012B1BB32ACE035EA43 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7CEE5259541DF8132F064CC5 /* BtrVoiceKeyboard.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		178AFE3701FE599EF6820511 /* SpeechTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTranscriber.swift; sourceTree = "<group>"; };
+		2450C234546BBB2A7B161A06 /* AppIcon76x76@2x~ipad.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon76x76@2x~ipad.png"; sourceTree = "<group>"; };
+		2992FFD0218876F7A073E5D1 /* BetterVoiceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterVoiceSettingsView.swift; sourceTree = "<group>"; };
+		47FDBC806D9105DED3FCCDE2 /* BtrVoice.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BtrVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4DA2E1365A30F4AFA75CB985 /* OpenAIRealtimeAudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIRealtimeAudioSession.swift; sourceTree = "<group>"; };
+		585B66546EECCEF32940F06D /* AppIcon60x60@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon60x60@2x.png"; sourceTree = "<group>"; };
+		5D22B8CB7DA78B28CB57B482 /* OpenAIKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIKeyStore.swift; sourceTree = "<group>"; };
+		83EFB564A0FF23392131C717 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9B5AE0EF44B665113F7774C7 /* BtrVoiceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BtrVoiceApp.swift; sourceTree = "<group>"; };
+		9B8102173673EA4EE47C0461 /* BetterVoiceRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetterVoiceRules.swift; sourceTree = "<group>"; };
+		9C62B9C85E0CAC43EEC0210B /* SharedTranscriptStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedTranscriptStore.swift; sourceTree = "<group>"; };
+		A0B174816E4C3944A17EAB9E /* AppIcon60x60@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon60x60@3x.png"; sourceTree = "<group>"; };
+		BEDF70215DB1A99B20F64E36 /* BtrVoiceKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BtrVoiceKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C59BB02DB73ECD8553C70D9C /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
+		F9FCE8F8FEAA306F2B9F636B /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1A4F5DC64D50317E16F85869 /* DeviceAssets */ = {
+			isa = PBXGroup;
+			children = (
+				585B66546EECCEF32940F06D /* AppIcon60x60@2x.png */,
+				A0B174816E4C3944A17EAB9E /* AppIcon60x60@3x.png */,
+				2450C234546BBB2A7B161A06 /* AppIcon76x76@2x~ipad.png */,
+			);
+			path = DeviceAssets;
+			sourceTree = "<group>";
+		};
+		27BC2E921F9AA894AE5E9845 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				9C62B9C85E0CAC43EEC0210B /* SharedTranscriptStore.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		338F4F5D583443692A1D0096 = {
+			isa = PBXGroup;
+			children = (
+				E38B6944FC9EDB143D9E8FCF /* BtrVoiceApp */,
+				6A3201051C5E57F4535EA158 /* BtrVoiceKeyboard */,
+				27BC2E921F9AA894AE5E9845 /* Shared */,
+				5579707A081AC6D78F4D03B2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5579707A081AC6D78F4D03B2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				47FDBC806D9105DED3FCCDE2 /* BtrVoice.app */,
+				BEDF70215DB1A99B20F64E36 /* BtrVoiceKeyboard.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		6A3201051C5E57F4535EA158 /* BtrVoiceKeyboard */ = {
+			isa = PBXGroup;
+			children = (
+				C59BB02DB73ECD8553C70D9C /* KeyboardViewController.swift */,
+			);
+			path = BtrVoiceKeyboard;
+			sourceTree = "<group>";
+		};
+		E38B6944FC9EDB143D9E8FCF /* BtrVoiceApp */ = {
+			isa = PBXGroup;
+			children = (
+				83EFB564A0FF23392131C717 /* Assets.xcassets */,
+				9B8102173673EA4EE47C0461 /* BetterVoiceRules.swift */,
+				2992FFD0218876F7A073E5D1 /* BetterVoiceSettingsView.swift */,
+				9B5AE0EF44B665113F7774C7 /* BtrVoiceApp.swift */,
+				F9FCE8F8FEAA306F2B9F636B /* ContentView.swift */,
+				5D22B8CB7DA78B28CB57B482 /* OpenAIKeyStore.swift */,
+				4DA2E1365A30F4AFA75CB985 /* OpenAIRealtimeAudioSession.swift */,
+				178AFE3701FE599EF6820511 /* SpeechTranscriber.swift */,
+				1A4F5DC64D50317E16F85869 /* DeviceAssets */,
+			);
+			path = BtrVoiceApp;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B1439F8D1C2ED1BFC7E1FF45 /* BtrVoice */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1586B6F84F7C9754B019FAE /* Build configuration list for PBXNativeTarget "BtrVoice" */;
+			buildPhases = (
+				1008E768F07A2DAA9BCE5E27 /* Sources */,
+				820C0CFB93D64172D0560A51 /* Resources */,
+				34D1A012B1BB32ACE035EA43 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				67836F8668D19BE251D48803 /* PBXTargetDependency */,
+			);
+			name = BtrVoice;
+			packageProductDependencies = (
+			);
+			productName = BtrVoice;
+			productReference = 47FDBC806D9105DED3FCCDE2 /* BtrVoice.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F463F04E39E2AE8711FE946C /* BtrVoiceKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 41497AA3EF42AA8F542E7B12 /* Build configuration list for PBXNativeTarget "BtrVoiceKeyboard" */;
+			buildPhases = (
+				E5F142FCEC2E447ACD100FAC /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BtrVoiceKeyboard;
+			packageProductDependencies = (
+			);
+			productName = BtrVoiceKeyboard;
+			productReference = BEDF70215DB1A99B20F64E36 /* BtrVoiceKeyboard.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1F6921DC1C0B01D2E7E34821 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					B1439F8D1C2ED1BFC7E1FF45 = {
+						DevelopmentTeam = R4JXK6ZVPU;
+						ProvisioningStyle = Automatic;
+					};
+					F463F04E39E2AE8711FE946C = {
+						DevelopmentTeam = R4JXK6ZVPU;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 1F6BF18838353419DDDF3549 /* Build configuration list for PBXProject "BtrVoice" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 338F4F5D583443692A1D0096;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5579707A081AC6D78F4D03B2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B1439F8D1C2ED1BFC7E1FF45 /* BtrVoice */,
+				F463F04E39E2AE8711FE946C /* BtrVoiceKeyboard */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		820C0CFB93D64172D0560A51 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C553F8F7101AF39BF9BFCAED /* AppIcon60x60@2x.png in Resources */,
+				413FE3A6AB21E1A8314F34E1 /* AppIcon60x60@3x.png in Resources */,
+				CFBD1FDA707DC125102FDF00 /* AppIcon76x76@2x~ipad.png in Resources */,
+				E5C032CAE254C03E13D2281D /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1008E768F07A2DAA9BCE5E27 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A23D3E4EA7E1924D4F492F40 /* BetterVoiceRules.swift in Sources */,
+				4105079F4DBB44EA3832575D /* BetterVoiceSettingsView.swift in Sources */,
+				0A41C944B92D37FA51A09F1B /* BtrVoiceApp.swift in Sources */,
+				B902B6F9B6C2139C007621C3 /* ContentView.swift in Sources */,
+				CC008CE31A6B192369023BCA /* OpenAIKeyStore.swift in Sources */,
+				13AC900373FB5C3F424B7F3F /* OpenAIRealtimeAudioSession.swift in Sources */,
+				F3D259D93B40695E82108D6C /* SharedTranscriptStore.swift in Sources */,
+				DE5E62F9001FE9CAFFAF2D4F /* SpeechTranscriber.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E5F142FCEC2E447ACD100FAC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6D70528BEB53BFAEE0EF1B62 /* KeyboardViewController.swift in Sources */,
+				F9630471EADD86397E52444F /* SharedTranscriptStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		67836F8668D19BE251D48803 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F463F04E39E2AE8711FE946C /* BtrVoiceKeyboard */;
+			targetProxy = 1527AFD4A6567629332FC5EB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		275A182CC1F181D329F010F4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BtrVoiceKeyboard/BtrVoiceKeyboard.entitlements;
+				INFOPLIST_FILE = BtrVoiceKeyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tanchienhao.BtrVoice.Keyboard;
+				PRODUCT_NAME = "Better Voice Keyboard";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9698D92A722372E6658A0374 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = R4JXK6ZVPU;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		99F0D68BB68D892B12A907AE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = BtrVoiceApp/BtrVoice.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = BtrVoiceApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tanchienhao.BtrVoice;
+				PRODUCT_NAME = "Better Voice";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9CCED87B29778E83499EFD8F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = BtrVoiceApp/BtrVoice.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = BtrVoiceApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tanchienhao.BtrVoice;
+				PRODUCT_NAME = "Better Voice";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AB6F9D5C13649D519B2BD4D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = BtrVoiceKeyboard/BtrVoiceKeyboard.entitlements;
+				INFOPLIST_FILE = BtrVoiceKeyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.tanchienhao.BtrVoice.Keyboard;
+				PRODUCT_NAME = "Better Voice Keyboard";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B75273728E86052EA2AC1994 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = R4JXK6ZVPU;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1F6BF18838353419DDDF3549 /* Build configuration list for PBXProject "BtrVoice" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9698D92A722372E6658A0374 /* Debug */,
+				B75273728E86052EA2AC1994 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		41497AA3EF42AA8F542E7B12 /* Build configuration list for PBXNativeTarget "BtrVoiceKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB6F9D5C13649D519B2BD4D1 /* Debug */,
+				275A182CC1F181D329F010F4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F1586B6F84F7C9754B019FAE /* Build configuration list for PBXNativeTarget "BtrVoice" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				99F0D68BB68D892B12A907AE /* Debug */,
+				9CCED87B29778E83499EFD8F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1F6921DC1C0B01D2E7E34821 /* Project object */;
+}
