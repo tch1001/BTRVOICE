@@ -25,7 +25,9 @@ final class DesktopVoiceMemory {
            let decoded = try? JSONDecoder().decode(State.self, from: data) {
             state = decoded
         } else {
-            state = State(preferredApplications: ["browser": "com.brave.Browser"])
+            let defaults = State(preferredApplications: ["browser": "com.brave.Browser"])
+            state = defaults
+            save(defaults)
         }
     }
 
