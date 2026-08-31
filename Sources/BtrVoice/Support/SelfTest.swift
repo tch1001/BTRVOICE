@@ -104,6 +104,61 @@ enum SelfTest {
             check("empty input yields nothing", actions.isEmpty, "\(actions)")
         }
 
+        print("DesktopVoice")
+        do {
+            let brave = DesktopVoiceApplicationTarget(
+                displayName: "Brave Browser",
+                bundleIdentifier: "com.brave.Browser",
+                applicationURL: URL(fileURLWithPath: "/Applications/Brave Browser.app")
+            )
+            let telegram = DesktopVoiceApplicationTarget(
+                displayName: "Telegram",
+                bundleIdentifier: "ru.keepcoder.Telegram",
+                applicationURL: URL(fileURLWithPath: "/Applications/Telegram.app")
+            )
+            let router = DesktopVoiceCommandRouter { name in
+                switch name {
+                case "browser", "brave": return brave
+                case "telegram": return telegram
+                default: return nil
+                }
+            }
+
+            check(
+                "semantic browser alias resolves to the preferred application",
+                router.route("Open the browser.") == .plan(DesktopVoicePlan(
+                    summary: "Open Brave Browser",
+                    actions: [.openApplication(brave)]
+                ))
+            )
+            check(
+                "a compound browser command becomes an ordered local plan",
+                router.route("Open a browser and create a new tab") == .plan(DesktopVoicePlan(
+                    summary: "Open Brave Browser and create a new tab",
+                    actions: [.openApplication(brave), .pressShortcut("cmd+t")]
+                ))
+            )
+            check(
+                "an explicitly named application launches through the same route",
+                router.route("Launch Telegram") == .plan(DesktopVoicePlan(
+                    summary: "Open Telegram",
+                    actions: [.openApplication(telegram)]
+                ))
+            )
+            check(
+                "a browser shortcut does not require an application launch",
+                router.route("Open a new tab") == .plan(DesktopVoicePlan(
+                    summary: "Create a new tab",
+                    actions: [.pressShortcut("cmd+t")]
+                ))
+            )
+            if case .unsupported = router.route("Arrange my research workspace") {
+                check("unknown goals stay out of the deterministic fast path", true)
+            } else {
+                check("unknown goals stay out of the deterministic fast path", false)
+            }
+        }
+
         print("Inputs")
         do {
             let source = AudioInputSourceID.microphone(uid: "USB microphone 1")

@@ -12,6 +12,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var cancellables: Set<AnyCancellable> = []
 
     var onTogglePanel: (() -> Void)?
+    var onHidePanel: (() -> Void)?
     var onResetPanelPosition: (() -> Void)?
 
     init(controller: DictationController) {
@@ -59,9 +60,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         dictate.keyEquivalentModifierMask = [.option]
         menu.addItem(dictate)
 
-        // Inspect the app that was active before BtrVoice presents its own window.
-        // Keeping this second makes the new surface as immediate as dictation.
-        menu.addItem(item("Start Computer Use", action: #selector(startComputerUse)))
+        // The fast desktop command surface stays second so it is as immediate as
+        // dictation. Its overlay is non-activating and preserves the target app.
+        menu.addItem(item(
+            DesktopVoiceCoordinator.shared.isListening ? "Stop Voice Control" : "Start Voice Control",
+            action: #selector(toggleDesktopVoice)
+        ))
 
         // An on-screen keyboard, like macOS's Accessibility Keyboard: clickable keys
         // that type into whatever app has focus.
@@ -71,7 +75,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         ))
 
         // Everything else buffer-related lives in the panel UI — the menu stays
-        // minimal: dictate, Computer Use, settings, health.
+        // minimal: dictate, voice control, settings, health.
         menu.addItem(.separator())
         menu.addItem(jarvisItem())
         menu.addItem(inputsItem())
@@ -327,12 +331,25 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Actions
 
-    @objc private func toggleDictation() { controller.toggleDictation() }
+    @objc private func toggleDictation() {
+        if DesktopVoiceCoordinator.shared.isListening || DesktopVoiceWindowController.shared.isVisible {
+            DesktopVoiceWindowController.shared.stopAndHide()
+        }
+        controller.toggleDictation()
+    }
 
-    @objc private func startComputerUse() {
+    @objc private func toggleDesktopVoice() {
+        if DesktopVoiceCoordinator.shared.isListening {
+            DesktopVoiceCoordinator.shared.stop()
+            return
+        }
         let target = NSWorkspace.shared.frontmostApplication
+        if controller.isListening {
+            controller.stopListening()
+        }
+        onHidePanel?()
         DispatchQueue.main.async {
-            ComputerUseWindowController.shared.show(target: target)
+            DesktopVoiceWindowController.shared.show(target: target, startListening: true)
         }
     }
 

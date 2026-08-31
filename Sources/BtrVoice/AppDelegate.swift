@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.onTogglePanel = { [weak self] in
             self?.panels.toggle(reposition: Settings.shared.followCaret)
         }
+        statusItem.onHidePanel = { [weak self] in
+            self?.panels.hide()
+        }
         statusItem.onResetPanelPosition = { [weak self] in
             self?.panels.resetPosition()
         }
@@ -53,12 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_JARVIS"] == "1" {
             DispatchQueue.main.async { JarvisSurfaceWindowController.shared.show() }
         }
-        // Dev hook: open the Computer Use inventory against whichever app was active
-        // while BtrVoice launched.
+        // Dev hook retained under its original name for existing launch scripts: it
+        // now opens the replacement desktop voice overlay without starting the mic.
         if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_COMPUTER_USE"] == "1" {
             let target = NSWorkspace.shared.frontmostApplication
             DispatchQueue.main.async {
-                ComputerUseWindowController.shared.show(target: target)
+                DesktopVoiceWindowController.shared.show(target: target, startListening: false)
             }
         }
         // Dev hook: start a listening session immediately, so the engine pipeline can
@@ -87,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         panels?.persistFrameNow()
         HotkeyManager.shared.unregister()
+        DesktopVoiceCoordinator.shared.shutdown()
         JarvisVoiceService.shared.shutdown()
     }
 
