@@ -10,18 +10,21 @@ private struct DesktopVoicePanelView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                Divider().opacity(0.5)
-                activity
-                Divider().opacity(0.5)
-                commandBar
+            ZStack {
+                DesktopVoiceDragHandle()
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    Divider().opacity(0.5)
+                    activity
+                    Divider().opacity(0.5)
+                    commandBar
+                }
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
             }
-            .frame(
-                width: geometry.size.width,
-                height: geometry.size.height,
-                alignment: .topLeading
-            )
         }
         .frame(minWidth: 340, minHeight: 190)
         .background {
@@ -40,7 +43,6 @@ private struct DesktopVoicePanelView: View {
 
     private var header: some View {
         ZStack {
-            DesktopVoiceDragHandle()
             HStack(spacing: 10) {
                 Button {
                     let target = NSWorkspace.shared.frontmostApplication
@@ -132,6 +134,9 @@ private struct DesktopVoicePanelView: View {
             .padding(12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Activity is read-only, so the entire body is useful window chrome. The
+        // editable command field and all buttons live outside this overlay.
+        .overlay(DesktopVoiceDragHandle())
     }
 
     private func activityRow(_ entry: DesktopVoiceCoordinator.Activity) -> some View {
@@ -202,8 +207,29 @@ private struct DesktopVoicePanelView: View {
 /// Lets the panel header move the window without making the panel key.
 private struct DesktopVoiceDragHandle: NSViewRepresentable {
     final class DragView: NSView {
-        override var mouseDownCanMoveWindow: Bool { true }
         override var needsPanelToBecomeKey: Bool { false }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
+
+        /// Keep trackpad/mouse-wheel scrolling useful when this drag surface sits
+        /// over the read-only activity list: temporarily reveal the underlying
+        /// SwiftUI scroll view and forward the wheel event to it.
+        override func scrollWheel(with event: NSEvent) {
+            guard let contentView = window?.contentView else {
+                super.scrollWheel(with: event)
+                return
+            }
+            isHidden = true
+            let underlying = contentView.hitTest(event.locationInWindow)
+            isHidden = false
+            if let underlying, underlying !== self {
+                underlying.scrollWheel(with: event)
+            } else {
+                super.scrollWheel(with: event)
+            }
+        }
     }
 
     func makeNSView(context: Context) -> DragView { DragView() }

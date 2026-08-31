@@ -25,30 +25,36 @@ struct DictationPanelView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                Divider().opacity(0.5)
-                transcript
-                if let error = controller.errorMessage {
-                    errorBanner(error)
-                }
-                Divider().opacity(0.5)
-                footer
-                if settings.biggerBottomButtons {
+            ZStack {
+                // Full-panel chrome behind the controls: blank space, labels, and
+                // material can move the panel; buttons and the editor remain above
+                // it and keep their normal click/selection behavior.
+                WindowDragHandle()
+                VStack(alignment: .leading, spacing: 0) {
+                    header
                     Divider().opacity(0.5)
-                    bigBottomBar
+                    transcript
+                    if let error = controller.errorMessage {
+                        errorBanner(error)
+                    }
+                    Divider().opacity(0.5)
+                    footer
+                    if settings.biggerBottomButtons {
+                        Divider().opacity(0.5)
+                        bigBottomBar
+                    }
                 }
+                // Several compact footer controls have fixed ideal widths. At a narrow
+                // window they can overflow, but they must not make the *entire* stack
+                // wider and centre it behind the panel's clip boundary. Pin the root
+                // stack to the AppKit content width so the large bottom buttons retain
+                // their leading inset and stay fully clickable.
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
             }
-            // Several compact footer controls have fixed ideal widths. At a narrow
-            // window they can overflow, but they must not make the *entire* stack
-            // wider and centre it behind the panel's clip boundary. Pin the root
-            // stack to the AppKit content width so the large bottom buttons retain
-            // their leading inset and stay fully clickable.
-            .frame(
-                width: geometry.size.width,
-                height: geometry.size.height,
-                alignment: .topLeading
-            )
         }
         .frame(minHeight: 170)
         // Vibrancy alone leaves the transcript competing with the wallpaper, so the
@@ -71,7 +77,6 @@ struct DictationPanelView: View {
 
     private var header: some View {
         ZStack {
-            WindowDragHandle()
             HStack(spacing: 10) {
                 Button {
                     controller.toggleDictation()
@@ -459,6 +464,8 @@ private struct WindowDragHandle: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 
     private final class DragView: NSView {
+        override var needsPanelToBecomeKey: Bool { false }
+
         override func mouseDown(with event: NSEvent) {
             window?.performDrag(with: event)
         }

@@ -130,10 +130,10 @@ final class FloatingPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = true
         hidesOnDeactivate = false
-        // Movement is owned by the explicit header drag handle. Letting arbitrary
-        // background views move the window competes with the enlarged manual resize
-        // zone and can translate the panel during a resize drag.
-        isMovableByWindowBackground = false
+        // Empty SwiftUI regions should behave like ordinary window chrome. Buttons,
+        // editors, and the edge resize overlay opt out through hit testing, while
+        // the explicit full-panel drag surfaces cover material/text backgrounds.
+        isMovableByWindowBackground = true
         acceptsMouseMovedEvents = true
         animationBehavior = .utilityWindow
         // Only steal keyboard focus when the user actually clicks into the editor.

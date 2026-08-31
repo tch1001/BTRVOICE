@@ -248,6 +248,11 @@ private final class EditorTextView: NSTextView {
     var onCommit: (() -> Void)?
     var onCancel: (() -> Void)?
 
+    /// The empty staging area is window chrome until there is text to edit. Once
+    /// content exists, normal NSTextView selection wins so the editor keeps its
+    /// core review-and-rewrite behavior.
+    override var mouseDownCanMoveWindow: Bool { string.isEmpty }
+
     override func keyDown(with event: NSEvent) {
         // 36 = Return, 53 = Escape
         if event.keyCode == 36, event.modifierFlags.contains(.command) {
