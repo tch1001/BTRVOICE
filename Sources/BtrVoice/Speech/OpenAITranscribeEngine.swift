@@ -121,7 +121,6 @@ final class OpenAITranscribeEngine: NSObject, TranscriptionEngine {
         }
         emit {
             self.onPartial?("")
-            if shouldReconnect { self.onStatus?("Transcript cleared — reconnecting") }
         }
     }
 

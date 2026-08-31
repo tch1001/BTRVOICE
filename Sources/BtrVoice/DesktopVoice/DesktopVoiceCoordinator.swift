@@ -48,6 +48,10 @@ final class DesktopVoiceCoordinator: ObservableObject {
     private var engine: TranscriptionEngine?
     private var queuedCommands: [String] = []
     private var commandIsExecuting = false
+    /// GPT Live Transcribe prioritizes low-latency deltas and can leave a short
+    /// command visible without a segment-final event. Once a complete fast-path
+    /// command has been stable for a brief pause, promote it ourselves.
+    private var autoSubmitTimer: Timer?
     private var lastExternalApplication: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
     private let selfPID = ProcessInfo.processInfo.processIdentifier
@@ -106,6 +110,8 @@ final class DesktopVoiceCoordinator: ObservableObject {
     }
 
     func stop() {
+        autoSubmitTimer?.invalidate()
+        autoSubmitTimer = nil
         audio.stop()
         engine?.cancel()
         engine = nil
@@ -140,6 +146,13 @@ final class DesktopVoiceCoordinator: ObservableObject {
         processNextCommandIfNeeded()
     }
 
+    /// Forces the visible gray speech tail through the same router as a final
+    /// transcript. Retiring that in-flight utterance first prevents a later server
+    /// completion from running the command a second time.
+    func submitPartialNow() {
+        submitCurrentPartial(fastPathOnly: false)
+    }
+
     func clearActivity() {
         activities.removeAll()
         partialTranscript = ""
@@ -155,11 +168,14 @@ final class DesktopVoiceCoordinator: ObservableObject {
         self.engine = engine
 
         engine.onPartial = { [weak self] transcript in
-            self?.partialTranscript = transcript
+            self?.receivePartial(transcript)
         }
         engine.onSegmentFinal = { [weak self] transcript in
-            self?.partialTranscript = ""
-            self?.submit(transcript)
+            guard let self else { return }
+            self.autoSubmitTimer?.invalidate()
+            self.autoSubmitTimer = nil
+            self.partialTranscript = ""
+            self.submit(transcript)
         }
         engine.onFinished = { [weak self] in
             guard let self else { return }
@@ -175,7 +191,8 @@ final class DesktopVoiceCoordinator: ObservableObject {
             self?.fail(error.localizedDescription)
         }
         engine.onStatus = { [weak self] message in
-            self?.status = message
+            guard let self, self.phase != .executing else { return }
+            self.status = message
         }
 
         audio.onBuffer = { [weak engine] buffer in
@@ -244,6 +261,44 @@ final class DesktopVoiceCoordinator: ObservableObject {
         }
     }
 
+    private func receivePartial(_ transcript: String) {
+        partialTranscript = transcript
+        autoSubmitTimer?.invalidate()
+        autoSubmitTimer = nil
+
+        let command = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty, isFastPathCommand(command) else { return }
+
+        // Long enough to distinguish successive streaming deltas, short enough
+        // that a familiar command visibly reacts within roughly one second.
+        autoSubmitTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: false) {
+            [weak self] _ in
+            guard let self else { return }
+            let stillVisible = self.partialTranscript
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard stillVisible == command else { return }
+            self.submitCurrentPartial(fastPathOnly: true)
+        }
+    }
+
+    private func submitCurrentPartial(fastPathOnly: Bool) {
+        autoSubmitTimer?.invalidate()
+        autoSubmitTimer = nil
+        let command = partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+        guard !fastPathOnly || isFastPathCommand(command) else { return }
+
+        partialTranscript = ""
+        engine?.discardUtterance()
+        submit(command)
+    }
+
+    private func isFastPathCommand(_ command: String) -> Bool {
+        if Self.isStopCommand(command) { return true }
+        if case .plan = router.route(command) { return true }
+        return false
+    }
+
     private func restoreListeningPhase() {
         phase = engine == nil ? .idle : .listening
         if engine != nil, queuedCommands.isEmpty, status.isEmpty {
@@ -264,6 +319,8 @@ final class DesktopVoiceCoordinator: ObservableObject {
     }
 
     private func fail(_ message: String) {
+        autoSubmitTimer?.invalidate()
+        autoSubmitTimer = nil
         audio.stop()
         engine?.cancel()
         engine = nil

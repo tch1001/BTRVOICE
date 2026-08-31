@@ -164,15 +164,19 @@ private struct DesktopVoicePanelView: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { submitManualCommand() }
             Button {
-                submitManualCommand()
+                hardSubmit()
             } label: {
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 18))
+                Label("Hard Submit", systemImage: "bolt.fill")
+                    .font(.system(size: 11, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-            .disabled(manualCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .help("Run command")
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(
+                manualCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && coordinator.partialTranscript
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
+            .help("Immediately run the typed command or the visible live transcript")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -182,6 +186,16 @@ private struct DesktopVoicePanelView: View {
         let command = manualCommand
         manualCommand = ""
         coordinator.submit(command)
+    }
+
+    private func hardSubmit() {
+        let typed = manualCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty {
+            coordinator.submitPartialNow()
+        } else {
+            manualCommand = ""
+            coordinator.submit(typed)
+        }
     }
 
     private func symbol(for kind: DesktopVoiceCoordinator.Activity.Kind) -> String {
