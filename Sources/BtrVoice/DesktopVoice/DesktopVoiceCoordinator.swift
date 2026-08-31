@@ -154,9 +154,16 @@ final class DesktopVoiceCoordinator: ObservableObject {
     }
 
     func clearActivity() {
+        autoSubmitTimer?.invalidate()
+        autoSubmitTimer = nil
         activities.removeAll()
         partialTranscript = ""
+        // The visible partial mirrors the transcriber's in-flight utterance. Clear
+        // both sides so the next audio delta starts at DEF rather than restoring
+        // discarded speech as ABCDEF.
+        engine?.discardUtterance()
         status = isListening ? "Listening for a command" : "Ready for a command"
+        Log.write("desktop-voice: cleared activity and current utterance")
     }
 
     private func beginListening() {

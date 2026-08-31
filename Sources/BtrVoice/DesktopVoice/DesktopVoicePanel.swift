@@ -80,7 +80,7 @@ private struct DesktopVoicePanelView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("Clear activity")
+                .help("Clear voice context and activity")
 
                 Button {
                     DesktopVoiceWindowController.shared.stopAndHide()
