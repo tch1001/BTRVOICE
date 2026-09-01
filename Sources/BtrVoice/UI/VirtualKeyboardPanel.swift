@@ -11,14 +11,14 @@ import SwiftUI
 /// CGEvent path, so to the target app they are indistinguishable from real presses.
 ///
 /// Modifiers are sticky, exactly like the Accessibility Keyboard: tap once to hold
-/// it for the next key, tap again to lock it, tap a third time to release. Shift
-/// also flips the key labels so the board shows what a press will produce.
+/// one for the next key or pointer gesture, tap again to lock it, and tap a third
+/// time to release. Shift also flips the labels to show what a key will produce.
 @MainActor
 final class VirtualKeyboardModel: ObservableObject {
 
-    enum Latch {
+    enum Latch: Equatable {
         case off
-        /// Applies to the next key, then releases.
+        /// Applies to the next key or external pointer gesture, then releases.
         case once
         /// Applies until tapped off.
         case locked
@@ -30,39 +30,72 @@ final class VirtualKeyboardModel: ObservableObject {
     @Published var command: Latch = .off
 
     private let keyHandler: (CGKeyCode, CGEventFlags) -> Void
+    private let modifiersChanged: (CGEventFlags) -> Void
 
-    init(keyHandler: @escaping (CGKeyCode, CGEventFlags) -> Void) {
+    init(
+        keyHandler: @escaping (CGKeyCode, CGEventFlags) -> Void,
+        modifiersChanged: @escaping (CGEventFlags) -> Void = { _ in }
+    ) {
         self.keyHandler = keyHandler
+        self.modifiersChanged = modifiersChanged
     }
 
     var shifted: Bool { shift != .off }
-
-    func toggle(_ keyPath: ReferenceWritableKeyPath<VirtualKeyboardModel, Latch>) {
-        switch self[keyPath: keyPath] {
-        case .off: self[keyPath: keyPath] = .once
-        case .once: self[keyPath: keyPath] = .locked
-        case .locked: self[keyPath: keyPath] = .off
-        }
-    }
-
-    /// Presses one key with whatever modifiers are latched, then releases the
-    /// one-shot latches. Fire and forget: a keyboard that popped an error dialog
-    /// per failed key would be worse than one that quietly does nothing, and the
-    /// failure that matters (no Accessibility grant) is already surfaced by the
-    /// menu bar's permission warnings.
-    func press(_ code: CGKeyCode) {
+    var activeModifierFlags: CGEventFlags {
         var flags: CGEventFlags = []
         if shift != .off { flags.insert(.maskShift) }
         if control != .off { flags.insert(.maskControl) }
         if option != .off { flags.insert(.maskAlternate) }
         if command != .off { flags.insert(.maskCommand) }
+        return flags
+    }
 
-        keyHandler(code, flags)
+    func toggle(_ keyPath: ReferenceWritableKeyPath<VirtualKeyboardModel, Latch>) {
+        let previousFlags = activeModifierFlags
+        switch self[keyPath: keyPath] {
+        case .off: self[keyPath: keyPath] = .once
+        case .once: self[keyPath: keyPath] = .locked
+        case .locked: self[keyPath: keyPath] = .off
+        }
+        publishModifiersIfChanged(from: previousFlags)
+    }
 
+    /// Presses one key with whatever modifiers are latched, then spends the
+    /// one-shot latches. Fire and forget: a keyboard that popped an error dialog
+    /// per failed key would be worse than one that quietly does nothing, and the
+    /// failure that matters (no Accessibility grant) is already surfaced by the
+    /// menu bar's permission warnings.
+    func press(_ code: CGKeyCode) {
+        keyHandler(code, activeModifierFlags)
+        consumeOneShotModifiers()
+    }
+
+    /// A real click/drag completed outside BtrVoice. One-shot latches are spent by
+    /// pointer actions just as they are by on-screen key presses; locked modifiers
+    /// remain active until the user taps them again.
+    func consumeOneShotModifiers() {
+        let previousFlags = activeModifierFlags
         if shift == .once { shift = .off }
         if control == .once { control = .off }
         if option == .once { option = .off }
         if command == .once { command = .off }
+        publishModifiersIfChanged(from: previousFlags)
+    }
+
+    func releaseAllModifiers() {
+        let previousFlags = activeModifierFlags
+        shift = .off
+        control = .off
+        option = .off
+        command = .off
+        publishModifiersIfChanged(from: previousFlags)
+    }
+
+    private func publishModifiersIfChanged(from previousFlags: CGEventFlags) {
+        let flags = activeModifierFlags
+        if flags != previousFlags {
+            modifiersChanged(flags)
+        }
     }
 }
 
@@ -136,17 +169,17 @@ struct VirtualKeyboardView: View {
                 row(Board.row3)
             }
             HStack(spacing: gap) {
-                latchKey("⇧", for: \.shift, width: 2.6, help: "Shift — tap for one key, tap twice to lock")
+                latchKey("⇧", for: \.shift, width: 2.6, help: "Shift — tap for one key or click, tap twice to lock")
                 row(Board.row4)
-                latchKey("⇧", for: \.shift, width: 2.6, help: "Shift — tap for one key, tap twice to lock")
+                latchKey("⇧", for: \.shift, width: 2.6, help: "Shift — tap for one key or click, tap twice to lock")
             }
             HStack(spacing: gap) {
-                latchKey("⌃", for: \.control, width: 1.3, help: "Control")
-                latchKey("⌥", for: \.option, width: 1.3, help: "Option")
-                latchKey("⌘", for: \.command, width: 1.6, help: "Command")
+                latchKey("⌃", for: \.control, width: 1.3, help: "Control — works with keys, clicks, drags, and scrolling")
+                latchKey("⌥", for: \.option, width: 1.3, help: "Option — works with keys, clicks, drags, and scrolling")
+                latchKey("⌘", for: \.command, width: 1.6, help: "Command — works with keys, clicks, drags, and scrolling")
                 key(Board.space)
-                latchKey("⌘", for: \.command, width: 1.6, help: "Command")
-                latchKey("⌥", for: \.option, width: 1.3, help: "Option")
+                latchKey("⌘", for: \.command, width: 1.6, help: "Command — works with keys, clicks, drags, and scrolling")
+                latchKey("⌥", for: \.option, width: 1.3, help: "Option — works with keys, clicks, drags, and scrolling")
                 ForEach(Board.arrows) { key($0) }
             }
         }
@@ -232,10 +265,13 @@ private final class KeyboardPanel: NSPanel {
 
 /// Owns the keyboard panel so the menu can toggle it.
 @MainActor
-final class VirtualKeyboardController {
+final class VirtualKeyboardController: NSObject, NSWindowDelegate {
     static let shared = VirtualKeyboardController()
     private var panel: NSPanel?
+    private var model: VirtualKeyboardModel?
     private var keyHandler: ((CGKeyCode, CGEventFlags) -> Void)?
+    private let pointerBridge = StickyModifierPointerBridge()
+    private var pointerReleaseMonitor: Any?
 
     var isVisible: Bool { panel?.isVisible ?? false }
 
@@ -245,6 +281,7 @@ final class VirtualKeyboardController {
 
     func toggle() {
         if let panel, panel.isVisible {
+            stopPointerModifierSupport()
             panel.orderOut(nil)
             return
         }
@@ -253,16 +290,23 @@ final class VirtualKeyboardController {
 
     private func show() {
         if let panel {
+            startPointerModifierSupport()
             panel.orderFrontRegardless()
             return
         }
-        let model = VirtualKeyboardModel { [weak self] code, flags in
-            guard let handler = self?.keyHandler else {
-                Log.write("keyboard: key suppressed because no target handler is configured")
-                return
+        let model = VirtualKeyboardModel(
+            keyHandler: { [weak self] code, flags in
+                guard let handler = self?.keyHandler else {
+                    Log.write("keyboard: key suppressed because no target handler is configured")
+                    return
+                }
+                handler(code, flags)
+            },
+            modifiersChanged: { [weak self] flags in
+                self?.pointerBridge.update(activeModifiers: flags)
             }
-            handler(code, flags)
-        }
+        )
+        self.model = model
         let hosting = NSHostingController(rootView: VirtualKeyboardView(model: model))
 
         // Titled so it can be dragged and closed natively, but non-activating and
@@ -283,6 +327,7 @@ final class VirtualKeyboardController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isExcludedFromWindowsMenu = true
         panel.isReleasedWhenClosed = false
+        panel.delegate = self
 
         // Force a layout pass before measuring: `fittingSize` is (0, 0) until the
         // SwiftUI hosting view has laid out, and a zero-size panel is on screen but
@@ -305,6 +350,39 @@ final class VirtualKeyboardController {
         }
 
         self.panel = panel
+        startPointerModifierSupport()
         panel.orderFrontRegardless()
+    }
+
+    func shutdown() {
+        stopPointerModifierSupport()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        stopPointerModifierSupport()
+    }
+
+    private func startPointerModifierSupport() {
+        pointerBridge.update(activeModifiers: model?.activeModifierFlags ?? [])
+        if !pointerBridge.start() {
+            Log.write("keyboard: could not install pointer modifier event tap")
+        }
+        guard pointerReleaseMonitor == nil else { return }
+        pointerReleaseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.model?.consumeOneShotModifiers()
+            }
+        }
+    }
+
+    private func stopPointerModifierSupport() {
+        model?.releaseAllModifiers()
+        if let pointerReleaseMonitor {
+            NSEvent.removeMonitor(pointerReleaseMonitor)
+            self.pointerReleaseMonitor = nil
+        }
+        pointerBridge.stop()
     }
 }

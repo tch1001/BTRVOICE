@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         panels?.persistFrameNow()
         HotkeyManager.shared.unregister()
+        VirtualKeyboardController.shared.shutdown()
         DesktopVoiceCoordinator.shared.shutdown()
         JarvisVoiceService.shared.shutdown()
     }

@@ -1,4 +1,5 @@
 import CoreAudio
+import CoreGraphics
 import Foundation
 
 /// `BtrVoice --self-test` exercises the parts that don't need a microphone, a screen,
@@ -88,6 +89,7 @@ enum SelfTest {
             check("two plain keys rejected", TextInjector.parseCombo("a+b") == nil)
             check("modifier only rejected", TextInjector.parseCombo("cmd+shift") == nil)
         }
+
         do {
             check("command words without the trigger stay literal",
                   VoiceCommands.parse("please paste the text", enabled: true)
@@ -102,6 +104,24 @@ enum SelfTest {
         do {
             let actions = VoiceCommands.parse("", enabled: true)
             check("empty input yields nothing", actions.isEmpty, "\(actions)")
+        }
+
+        print("VirtualKeyboard")
+        do {
+            let merged = StickyModifierPointerBridge.mergedFlags(
+                eventFlags: [.maskControl],
+                activeModifiers: [.maskShift, .maskCommand]
+            )
+            check("latched Shift is added to a real pointer event",
+                  merged.contains(.maskShift))
+            check("multiple virtual modifiers can accompany a pointer event",
+                  merged.contains(.maskCommand))
+            check("physical pointer modifiers are preserved",
+                  merged.contains(.maskControl))
+            check("drag and scroll events participate in sticky modifiers",
+                  StickyModifierPointerBridge.pointerEventTypes.contains(.leftMouseDragged)
+                    && StickyModifierPointerBridge.pointerEventTypes.contains(.scrollWheel))
+
         }
 
         print("DesktopVoice")
