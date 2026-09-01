@@ -121,6 +121,10 @@ enum SelfTest {
             check("drag and scroll events participate in sticky modifiers",
                   StickyModifierPointerBridge.pointerEventTypes.contains(.leftMouseDragged)
                     && StickyModifierPointerBridge.pointerEventTypes.contains(.scrollWheel))
+            check("the keyboard panel is non-activating from construction",
+                  VirtualKeyboardPanelPolicy.styleMask.contains(.nonactivatingPanel))
+            check("virtual keys post into the current login session",
+                  TextInjector.virtualKeyboardSourceState == .combinedSessionState)
 
         }
 

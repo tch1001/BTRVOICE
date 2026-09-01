@@ -64,6 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DesktopVoiceWindowController.shared.show(target: target, startListening: false)
             }
         }
+        // Dev hook: expose the real non-activating keyboard directly so system
+        // overlays such as Apps/Launchpad can be regression-tested without first
+        // activating the menu-bar item that would close the overlay under test.
+        if ProcessInfo.processInfo.environment["BTRVOICE_SHOW_VIRTUAL_KEYBOARD"] == "1" {
+            DispatchQueue.main.async { VirtualKeyboardController.shared.toggle() }
+        }
         // Dev hook: start a listening session immediately, so the engine pipeline can
         // be exercised headlessly.
         if ProcessInfo.processInfo.environment["BTRVOICE_AUTOSTART"] == "1" {

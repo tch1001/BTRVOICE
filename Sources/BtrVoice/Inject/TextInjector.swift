@@ -26,6 +26,7 @@ enum TextInjector {
     private static let controlKeyCode: CGKeyCode = 59
     private static let commandKeyCode: CGKeyCode = 55
     static let f12KeyCode: CGKeyCode = 111
+    static let virtualKeyboardSourceState: CGEventSourceStateID = .combinedSessionState
 
     /// A private event source does not inherit the real hardware modifier state, so
     /// a still-held ⌥ from the hotkey can't corrupt what we type.
@@ -203,20 +204,57 @@ enum TextInjector {
     /// Presses an arbitrary chord in the frontmost app — every modifier goes
     /// down as its own event first, for apps that watch flagsChanged.
     static func pressCombo(key: CGKeyCode, flags: CGEventFlags, completion: @escaping (Result<Void, InjectionError>) -> Void) {
+        pressCombo(
+            key: key,
+            flags: flags,
+            sourceState: .privateState,
+            activationDelay: 80_000,
+            completion: completion
+        )
+    }
+
+    /// Posts one on-screen-keyboard gesture into the current login session without
+    /// waiting for an application activation. The keyboard's panel is genuinely
+    /// non-activating, so the receiving surface may be a Dock-owned system overlay
+    /// such as Apps/Launchpad rather than an `NSRunningApplication` window.
+    static func pressVirtualKey(
+        key: CGKeyCode,
+        flags: CGEventFlags,
+        completion: @escaping (Result<Void, InjectionError>) -> Void
+    ) {
+        pressCombo(
+            key: key,
+            flags: flags,
+            sourceState: virtualKeyboardSourceState,
+            activationDelay: 0,
+            completion: completion
+        )
+    }
+
+    private static func pressCombo(
+        key: CGKeyCode,
+        flags: CGEventFlags,
+        sourceState: CGEventSourceStateID,
+        activationDelay: useconds_t,
+        completion: @escaping (Result<Void, InjectionError>) -> Void
+    ) {
         guard AXIsProcessTrusted() else {
             completion(.failure(.notTrusted))
             return
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            guard let source = makeSource() else {
+            guard let source = CGEventSource(stateID: sourceState) else {
                 DispatchQueue.main.async { completion(.failure(.eventSourceUnavailable)) }
                 return
             }
-            // The target app may have been activated only just now; give the
-            // window server a beat so the chord lands after the app is key.
-            usleep(80_000)
+            if activationDelay > 0 {
+                // General command execution may have activated its target just now;
+                // give the window server a beat so that chord lands after it is key.
+                usleep(activationDelay)
+            }
             let modifierKeys: [(CGEventFlags, CGKeyCode)] = [
-                (.maskControl, controlKeyCode), (.maskAlternate, 58), (.maskShift, 56), (.maskCommand, commandKeyCode),
+                (.maskControl, controlKeyCode), (.maskAlternate, 58),
+                (.maskShift, 56), (.maskCommand, commandKeyCode),
             ]
             let held = modifierKeys.filter { flags.contains($0.0) }
             for (_, code) in held {

@@ -252,6 +252,14 @@ struct VirtualKeyboardView: View {
 
 // MARK: - Panel
 
+/// Construction-time properties that keep the keyboard out of the activation
+/// transaction for the app or system surface receiving its keys.
+enum VirtualKeyboardPanelPolicy {
+    static let styleMask: NSWindow.StyleMask = [
+        .titled, .closable, .utilityWindow, .nonactivatingPanel,
+    ]
+}
+
 /// A keyboard that never takes focus. Overriding `canBecomeKey` to false is the whole
 /// trick: a plain panel becomes the key window the instant you click a control in it,
 /// and then the keystrokes this thing injects land on *itself* — a window with no text
@@ -259,6 +267,25 @@ struct VirtualKeyboardView: View {
 /// never be key, clicks still reach its buttons but focus stays on the app underneath,
 /// which is exactly where the injected keys should go.
 private final class KeyboardPanel: NSPanel {
+    /// `.nonactivatingPanel` must be present in the designated initializer. Adding
+    /// it after `NSPanel(contentViewController:)` has already created the WindowServer
+    /// window can leave the panel visually non-key without the prevent-activation
+    /// behavior needed by Dock-owned surfaces such as Apps/Launchpad.
+    init(nonactivatingContentViewController controller: NSViewController) {
+        super.init(
+            contentRect: .zero,
+            styleMask: VirtualKeyboardPanelPolicy.styleMask,
+            backing: .buffered,
+            defer: false
+        )
+        contentViewController = controller
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is unavailable")
+    }
+
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
@@ -313,10 +340,10 @@ final class VirtualKeyboardController: NSObject, NSWindowDelegate {
         // never key (see KeyboardPanel): clicking a key must leave focus exactly where
         // it is. The window level and space behaviour mirror the dictation panel —
         // always on top, present on every desktop, never listed in the window switcher.
-        let panel = KeyboardPanel(contentViewController: hosting)
-        panel.styleMask = [.titled, .closable, .utilityWindow, .nonactivatingPanel]
+        let panel = KeyboardPanel(nonactivatingContentViewController: hosting)
         panel.title = "Keyboard"
         panel.becomesKeyOnlyIfNeeded = true
+        panel.worksWhenModal = true
         panel.isFloatingPanel = true
         // The level the real Accessibility Keyboard uses. `.floating` sits *below*
         // Launchpad and Mission Control, so the keyboard would vanish under them; the

@@ -211,7 +211,7 @@ final class DictationController: ObservableObject {
         releaseFocus?()
 
         let inject = {
-            TextInjector.pressCombo(key: code, flags: flags) { result in
+            TextInjector.pressVirtualKey(key: code, flags: flags) { result in
                 if case .failure(let error) = result {
                     Log.write("keyboard: key injection failed — \(error.localizedDescription)")
                 }
