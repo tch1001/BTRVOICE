@@ -46,12 +46,14 @@ final class DesktopVoiceCoordinator: ObservableObject {
 
     private let audio = AudioCapture()
     private let executor = DesktopVoiceExecutor()
-    private lazy var router = DesktopVoiceCommandRouter { phrase in
-        DesktopApplicationResolver.shared.resolve(phrase)
-    }
-    private lazy var assistant = DesktopVoiceAssistant { phrase in
-        DesktopApplicationResolver.shared.resolve(phrase)
-    }
+    private lazy var router = DesktopVoiceCommandRouter(
+        resolveApplication: { DesktopApplicationResolver.shared.resolve($0) },
+        learnedSkills: { DesktopVoiceSkillStore.shared.skills }
+    )
+    private lazy var assistant = DesktopVoiceAssistant(
+        resolveApplication: { DesktopApplicationResolver.shared.resolve($0) },
+        learnedSkills: { DesktopVoiceSkillStore.shared.skills }
+    )
     private var engine: TranscriptionEngine?
     private var queuedCommands: [String] = []
     private var commandIsExecuting = false
@@ -287,6 +289,24 @@ final class DesktopVoiceCoordinator: ObservableObject {
                     self.finishCurrentCommand()
                 case .plan(let plan):
                     self.execute(plan, source: "Model slow path")
+                case .learn(let draft):
+                    do {
+                        let skill = try DesktopVoiceSkillStore.shared.add(
+                            draft,
+                            resolveApplication: { DesktopApplicationResolver.shared.resolve($0) }
+                        )
+                        let trigger = skill.triggers.first ?? skill.name
+                        self.append(
+                            .answer,
+                            "Learned “\(skill.name)”",
+                            detail: "Say “\(trigger)” to run it. Use Skills to edit or delete it."
+                        )
+                        self.status = "Learned a new fast path"
+                    } catch {
+                        self.append(.failure, "Couldn't learn that skill", detail: error.localizedDescription)
+                        self.status = error.localizedDescription
+                    }
+                    self.finishCurrentCommand()
                 case .unsupported(let reason):
                     self.append(.notice, "I can't do that yet", detail: reason)
                     self.status = reason

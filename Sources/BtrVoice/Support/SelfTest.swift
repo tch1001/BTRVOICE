@@ -196,6 +196,33 @@ enum SelfTest {
                   router.route("How do I add a new fast path command?")
                     == .answer(DesktopVoiceCommandRouter.addingFastPathsAnswer))
 
+            let learnedSkill = DesktopVoiceLearnedSkill(
+                id: UUID(),
+                name: "Rescue tab",
+                triggers: ["rescue tab"],
+                summary: "Reopen the last closed tab",
+                actions: [DesktopVoiceSkillActionSpec(kind: .shortcut, value: "cmd+shift+t")],
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            let learnedRouter = DesktopVoiceCommandRouter(
+                resolveApplication: resolveApplication,
+                learnedSkills: { [learnedSkill] }
+            )
+            check(
+                "a learned exact phrase becomes a deterministic local plan",
+                learnedRouter.route("Rescue tab!") == .plan(DesktopVoicePlan(
+                    summary: "Reopen the last closed tab",
+                    actions: [.pressShortcut("cmd+shift+t")]
+                ))
+            )
+            if case .answer(let answer) = learnedRouter.route("List fast paths") {
+                check("learned skills appear in voice introspection",
+                      answer.contains("1 learned fast path") && answer.contains("Rescue tab"), answer)
+            } else {
+                check("learned skills appear in voice introspection", false)
+            }
+
             let answerBody: [String: Any] = [
                 "output": [[
                     "type": "message",
@@ -219,7 +246,7 @@ enum SelfTest {
                     "arguments": """
                     {"summary":"Open Brave and create a tab","actions":[
                       {"type":"open_application","application":"brave","shortcut":null},
-                      {"type":"shortcut","application":null,"shortcut":"new_tab"}
+                      {"type":"shortcut","application":null,"shortcut":"cmd+t"}
                     ]}
                     """,
                 ]] as [[String: Any]],
@@ -240,7 +267,7 @@ enum SelfTest {
                     "name": "run_desktop_plan",
                     "arguments": """
                     {"summary":"Run an unsafe shortcut","actions":[
-                      {"type":"shortcut","application":null,"shortcut":"delete_everything"}
+                      {"type":"shortcut","application":null,"shortcut":"cmd+banana"}
                     ]}
                     """,
                 ]] as [[String: Any]],
@@ -250,6 +277,49 @@ enum SelfTest {
                     unsafeBody,
                     resolveApplication: resolveApplication
                   )) == nil)
+
+            let teachBody: [String: Any] = [
+                "output": [[
+                    "type": "function_call",
+                    "name": "teach_fast_path",
+                    "arguments": """
+                    {"name":"Rescue tab","triggers":["rescue tab"],
+                     "summary":"Reopen the last closed tab","actions":[
+                      {"type":"shortcut","application":null,"shortcut":"cmd+shift+t"}
+                    ]}
+                    """,
+                ]] as [[String: Any]],
+            ]
+            let teachDecision = try? DesktopVoiceAssistant.interpret(
+                teachBody,
+                resolveApplication: resolveApplication
+            )
+            check(
+                "the slow path compiles an explicit teaching call into a declarative skill",
+                teachDecision == .learn(DesktopVoiceSkillDraft(
+                    name: "Rescue tab",
+                    triggers: ["rescue tab"],
+                    summary: "Reopen the last closed tab",
+                    actions: [DesktopVoiceSkillActionSpec(kind: .shortcut, value: "cmd+shift+t")]
+                ))
+            )
+
+            let skillsURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("btrvoice-self-test-\(UUID().uuidString).json")
+            let skillStore = DesktopVoiceSkillStore(fileURL: skillsURL)
+            _ = try? skillStore.add(
+                DesktopVoiceSkillDraft(
+                    name: "Rescue tab",
+                    triggers: ["rescue tab", "bring back tab"],
+                    summary: "Reopen the last closed tab",
+                    actions: [DesktopVoiceSkillActionSpec(kind: .shortcut, value: "cmd+shift+t")]
+                ),
+                resolveApplication: resolveApplication
+            )
+            let reloadedSkills = DesktopVoiceSkillStore(fileURL: skillsURL).skills
+            check("learned skills survive a store reload",
+                  reloadedSkills.count == 1 && reloadedSkills[0].triggers.contains("rescue tab"))
+            try? FileManager.default.removeItem(at: skillsURL)
         }
 
         print("Inputs")

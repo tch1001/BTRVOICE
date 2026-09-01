@@ -79,13 +79,18 @@ struct DesktopVoiceCommandRouter {
     }
 
     static let addingFastPathsAnswer = """
-    Fast paths are currently built into DesktopVoiceCommandRouter.swift; there is no in-app Add Command button yet. Each shortcut family has one registry entry containing its name, examples, summary, and allowlisted key combination. Because routing and self-description read the same registry, a new entry appears in this command list automatically.
+    Yes. Say something like “Learn a skill called Reopen tab. When I say rescue tab, press Command-Shift-T.” I will validate and save it as a local fast path. Use the Skills button in the Voice Control panel to review, edit, or delete anything you teach me.
     """
 
     private let resolveApplication: ApplicationResolver
+    private let learnedSkills: () -> [DesktopVoiceLearnedSkill]
 
-    init(resolveApplication: @escaping ApplicationResolver) {
+    init(
+        resolveApplication: @escaping ApplicationResolver,
+        learnedSkills: @escaping () -> [DesktopVoiceLearnedSkill] = { [] }
+    ) {
         self.resolveApplication = resolveApplication
+        self.learnedSkills = learnedSkills
     }
 
     func route(_ transcript: String) -> DesktopVoiceRouteResult {
@@ -99,7 +104,21 @@ struct DesktopVoiceCommandRouter {
         }
 
         if Self.isHelpQuestion(command) {
-            return .answer(Self.helpAnswer)
+            return .answer(helpAnswer())
+        }
+
+        if let skill = learnedSkills().first(where: { skill in
+            skill.triggers.contains { Self.normalized($0) == command }
+        }) {
+            do {
+                let plan = try DesktopVoiceSkillStore.plan(
+                    for: skill,
+                    resolveApplication: resolveApplication
+                )
+                return .plan(plan)
+            } catch {
+                return .unsupported(error.localizedDescription)
+            }
         }
 
         for rule in Self.shortcutRules where rule.commands.contains(command) {
@@ -133,6 +152,17 @@ struct DesktopVoiceCommandRouter {
         .plan(DesktopVoicePlan(summary: summary, actions: [.pressShortcut(combo)]))
     }
 
+    private func helpAnswer() -> String {
+        let learned = learnedSkills()
+        guard !learned.isEmpty else { return Self.helpAnswer }
+        let rows = learned.map { skill in
+            let triggers = skill.triggers.map { "“\($0)”" }.joined(separator: ", ")
+            return "- \(skill.name) — \(skill.summary). Say: \(triggers)"
+        }
+        return Self.helpAnswer + "\n\nI also have \(learned.count) learned fast path\(learned.count == 1 ? "" : "s"):\n"
+            + rows.joined(separator: "\n")
+    }
+
     private static let launchVerbs = ["open ", "launch ", "start "]
 
     private static func isHelpQuestion(_ command: String) -> Bool {
@@ -152,8 +182,12 @@ struct DesktopVoiceCommandRouter {
     }
 
     private static func isAddingFastPathQuestion(_ command: String) -> Bool {
-        (command.contains("add") || command.contains("create") || command.contains("make"))
-            && (command.contains("fast path") || command.contains("new command"))
+        let asksHow = command.contains("how do i") || command.contains("how can i")
+            || command.contains("can i") || command.contains("is there a way")
+        let asksAboutTeaching = command.contains("teach") || command.contains("learn")
+            || command.contains("add") || command.contains("create") || command.contains("make")
+        return asksHow && asksAboutTeaching
+            && (command.contains("skill") || command.contains("fast path") || command.contains("new command"))
     }
 
     private static func strippingLaunchVerb(from command: String) -> String? {
@@ -187,7 +221,7 @@ struct DesktopVoiceCommandRouter {
         return text
     }
 
-    private static func normalized(_ text: String) -> String {
+    static func normalized(_ text: String) -> String {
         let lowered = text.lowercased()
         let cleaned = lowered.unicodeScalars.map { scalar -> Character in
             CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "[]")).contains(scalar)

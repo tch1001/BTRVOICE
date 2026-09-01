@@ -75,6 +75,16 @@ private struct DesktopVoicePanelView: View {
                 Spacer(minLength: 4)
 
                 Button {
+                    DesktopVoiceSkillsWindowController.shared.show()
+                } label: {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Review, edit, or delete learned skills")
+
+                Button {
                     coordinator.clearActivity()
                 } label: {
                     Image(systemName: "trash")
