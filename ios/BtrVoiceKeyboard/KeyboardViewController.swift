@@ -9,6 +9,7 @@ final class KeyboardViewController: UIInputViewController {
   }
 
   private let draftView = UITextView()
+  private let historyButton = UIButton(type: .system)
   private let listeningButton = UIButton(type: .system)
   private let insertButton = UIButton(type: .system)
   private let trashButton = UIButton(type: .system)
@@ -62,15 +63,41 @@ final class KeyboardViewController: UIInputViewController {
     draftView.layer.cornerRadius = 10
     draftView.layer.borderWidth = 0.5
     draftView.layer.borderColor = UIColor.separator.cgColor
-    draftView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+    draftView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 40)
     draftView.autocorrectionType = .yes
     draftView.autocapitalizationType = .sentences
     draftView.returnKeyType = .default
     draftView.isEditable = false
     draftView.isSelectable = true
     draftView.accessibilityLabel = "Better Voice draft"
-    root.addArrangedSubview(draftView)
-    draftView.heightAnchor.constraint(equalToConstant: 80).isActive = true
+    let draftContainer = UIView()
+    draftContainer.addSubview(draftView)
+    draftView.translatesAutoresizingMaskIntoConstraints = false
+
+    var historyConfiguration = UIButton.Configuration.tinted()
+    historyConfiguration.image = UIImage(systemName: "clock.arrow.circlepath")
+    historyConfiguration.cornerStyle = .capsule
+    historyConfiguration.baseForegroundColor = .secondaryLabel
+    historyConfiguration.baseBackgroundColor = .systemGray5
+    historyButton.configuration = historyConfiguration
+    historyButton.accessibilityLabel = "Previously inserted text"
+    historyButton.showsMenuAsPrimaryAction = true
+    historyButton.translatesAutoresizingMaskIntoConstraints = false
+    draftContainer.addSubview(historyButton)
+    refreshHistoryMenu()
+
+    root.addArrangedSubview(draftContainer)
+    draftContainer.heightAnchor.constraint(equalToConstant: 80).isActive = true
+    NSLayoutConstraint.activate([
+      draftView.leadingAnchor.constraint(equalTo: draftContainer.leadingAnchor),
+      draftView.trailingAnchor.constraint(equalTo: draftContainer.trailingAnchor),
+      draftView.topAnchor.constraint(equalTo: draftContainer.topAnchor),
+      draftView.bottomAnchor.constraint(equalTo: draftContainer.bottomAnchor),
+      historyButton.topAnchor.constraint(equalTo: draftContainer.topAnchor, constant: 6),
+      historyButton.trailingAnchor.constraint(equalTo: draftContainer.trailingAnchor, constant: -6),
+      historyButton.widthAnchor.constraint(equalToConstant: 30),
+      historyButton.heightAnchor.constraint(equalToConstant: 30),
+    ])
 
     let controls = UIStackView()
     controls.axis = .horizontal
@@ -182,7 +209,9 @@ final class KeyboardViewController: UIInputViewController {
   @objc private func insertDraft() {
     let draft = currentDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !draft.isEmpty else { return }
+    SharedTranscriptStore.recordInsertion(draft)
     textDocumentProxy.insertText(draft)
+    refreshHistoryMenu()
     if let liveDraft = SharedTranscriptStore.loadLiveDraft(),
        liveDraft.isListening,
       Date().timeIntervalSince(liveDraft.updatedAt) < 3 {
@@ -197,6 +226,56 @@ final class KeyboardViewController: UIInputViewController {
       listeningButton.isEnabled = false
       trashButton.isEnabled = false
     }
+  }
+
+  private func refreshHistoryMenu() {
+    let history = SharedTranscriptStore.loadInsertionHistory()
+    let historyActions: [UIMenuElement]
+    if history.isEmpty {
+      historyActions = [
+        UIAction(title: "No inserted text yet", image: UIImage(systemName: "tray"), attributes: .disabled) { _ in }
+      ]
+    } else {
+      historyActions = history.prefix(12).map { entry in
+        UIAction(
+          title: historyTitle(for: entry.text),
+          image: UIImage(systemName: "arrow.turn.down.left")
+        ) { [weak self] _ in
+          self?.reinsertHistoryEntry(entry)
+        }
+      }
+    }
+
+    let clearAction = UIAction(
+      title: "Clear All Insert History",
+      image: UIImage(systemName: "trash"),
+      attributes: history.isEmpty ? [.disabled, .destructive] : .destructive
+    ) { [weak self] _ in
+      SharedTranscriptStore.clearInsertionHistory()
+      self?.refreshHistoryMenu()
+    }
+
+    historyButton.menu = UIMenu(
+      title: "Insert History",
+      children: [
+        UIMenu(options: .displayInline, children: historyActions),
+        UIMenu(title: "Clear History…", options: .destructive, children: [clearAction]),
+      ]
+    )
+  }
+
+  private func reinsertHistoryEntry(_ entry: SharedInsertionHistoryEntry) {
+    SharedTranscriptStore.recordInsertion(entry.text)
+    textDocumentProxy.insertText(entry.text)
+    refreshHistoryMenu()
+  }
+
+  private func historyTitle(for text: String) -> String {
+    let oneLine = text.replacingOccurrences(of: "\n", with: " ")
+      .replacingOccurrences(of: "\t", with: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard oneLine.count > 52 else { return oneLine }
+    return String(oneLine.prefix(51)) + "…"
   }
 
   private func refreshTranscript(force: Bool) {

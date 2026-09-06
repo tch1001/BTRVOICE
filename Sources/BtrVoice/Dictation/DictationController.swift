@@ -140,6 +140,30 @@ final class DictationController: ObservableObject {
         performCommit(send: send)
     }
 
+    /// Retries a previously committed snapshot without mutating the current draft
+    /// or creating duplicate history entries. The user can choose whether this
+    /// attempt should also press Return, regardless of the original action.
+    func reinsertHistory(_ entry: InsertionHistoryEntry, send: Bool) {
+        guard phase == .idle else {
+            status = "Finish the current action before retrying history"
+            return
+        }
+        let text = entry.text.trimmingCharacters(in: .newlines)
+        guard !text.isEmpty else { return }
+        guard Permissions.accessibilityGranted else {
+            fail("Accessibility access is required to type into other apps.")
+            Permissions.requestAccessibility()
+            Permissions.openSettings(.accessibility)
+            return
+        }
+
+        let targetName = targets.targetName ?? "the focused app"
+        Log.write("history retry: \(text.count) chars → \(targetName), send=\(send)")
+        inject(text, send: send, targetName: targetName) { [weak self] in
+            self?.status = "Reinserted into \(targetName)"
+        }
+    }
+
     /// Throws the buffer away without typing anything.
     func cancel() {
         resumeAfterCommit = false
@@ -897,16 +921,46 @@ final class DictationController: ObservableObject {
             return
         }
         guard Permissions.accessibilityGranted else {
+            InsertionHistoryStore.shared.record(
+                text: text,
+                targetName: targets.targetName,
+                send: send
+            )
             fail("Accessibility access is required to type into other apps.")
             Permissions.requestAccessibility()
             Permissions.openSettings(.accessibility)
             return
         }
 
-        phase = .committing
         let targetName = targets.targetName ?? "the focused app"
-        status = "Inserting into \(targetName)…"
+        InsertionHistoryStore.shared.record(
+            text: text,
+            targetName: targets.targetName,
+            send: send
+        )
         Log.write("commit: \(text.count) chars → \(targetName) via \(settings.injectionMode.label)")
+
+        inject(text, send: send, targetName: targetName) { [weak self] in
+            guard let self else { return }
+            // Clear only what was typed — an in-flight grey tail wasn't
+            // inserted, so it stays staged for the next insert.
+            if self.settings.clearAfterCommit { self.buffer.clearCommitted() }
+            if self.resumeAfterCommit {
+                self.resumeAfterCommit = false
+                self.startListening()
+            }
+        }
+    }
+
+    /// Shared focus-safe keystroke delivery for fresh and recovered text.
+    private func inject(
+        _ text: String,
+        send: Bool,
+        targetName: String,
+        onSuccess: @escaping () -> Void
+    ) {
+        phase = .committing
+        status = "Inserting into \(targetName)…"
 
         // Order matters: stop being the key window, then make sure the destination
         // really has focus, and only then post events.
@@ -927,14 +981,8 @@ final class DictationController: ObservableObject {
                 switch result {
                 case .success:
                     self.status = "Inserted into \(targetName)"
-                    // Clear only what was typed — an in-flight grey tail wasn't
-                    // inserted, so it stays staged for the next insert.
-                    if self.settings.clearAfterCommit { self.buffer.clearCommitted() }
                     self.phase = .idle
-                    if self.resumeAfterCommit {
-                        self.resumeAfterCommit = false
-                        self.startListening()
-                    }
+                    onSuccess()
                 case .failure(let error):
                     self.resumeAfterCommit = false
                     self.fail(error.localizedDescription)

@@ -7,6 +7,7 @@ struct ContentView: View {
   @ObservedObject private var rules = BetterVoiceRules.shared
   @State private var latest = SharedTranscriptStore.load()
   @State private var showingSettings = false
+  @State private var showingInsertionHistory = false
 
   var body: some View {
     NavigationStack {
@@ -33,6 +34,15 @@ struct ContentView: View {
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
           Button {
+            showingInsertionHistory = true
+          } label: {
+            Image(systemName: "clock.arrow.circlepath")
+          }
+          .disabled(transcriber.isRecording)
+          .accessibilityLabel("Insert history")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+          Button {
             showingSettings = true
           } label: {
             Image(systemName: "gearshape.fill")
@@ -42,6 +52,12 @@ struct ContentView: View {
       }
       .sheet(isPresented: $showingSettings) {
         BetterVoiceSettingsView(transcriber: transcriber)
+      }
+      .sheet(isPresented: $showingInsertionHistory) {
+        InsertionHistoryView { entry in
+          transcriber.transcript = entry.text
+          latest = SharedTranscriptStore.save(entry.text)
+        }
       }
       .onAppear { latest = SharedTranscriptStore.load() }
       .onOpenURL(perform: handleDeepLink)

@@ -26,6 +26,8 @@ and the Settings UI can add, edit, inspect, or delete them.
 The extension is about 139 points high and has no QWERTY rows. It contains:
 
 - a scrollable text area with the edited draft and gray raw-heard text;
+- an insert-history menu in the draft area for retrying text that did not land in the
+  intended app;
 - **Listen/Pause** for the active background session;
 - **Insert**, which inserts the edited draft, clears it, and pauses processing;
 - **Trash**, which clears the current shared draft without pausing listening;
@@ -44,6 +46,12 @@ the shared App Group. The keyboard sends Listen/Pause/finish commands back throu
 same App Group. While paused, the microphone session remains armed so iOS can keep the
 app alive, but audio buffers are discarded locally and are not sent to GPT. Text is
 inserted only after an explicit **Insert** tap.
+
+Every explicit Insert is saved to a 100-entry history in the shared App Group before
+the keyboard sends it to the target app. Tap the history icon in the keyboard to reinsert
+a recent entry without leaving the current app. The containing app also has an Insert
+History screen for reviewing, restoring, deleting, or clearing entries. Restoring an entry
+in the app makes it the current editable draft and republishes it to the keyboard.
 
 ## Build
 

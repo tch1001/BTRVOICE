@@ -102,6 +102,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        menu.addItem(item("History…", action: #selector(showInsertionHistory)))
         menu.addItem(item("Voice Commands…", action: #selector(showVoiceCommandHelp)))
         menu.addItem(item("Diagnostics…", action: #selector(showDiagnostics)))
         menu.addItem(item(
@@ -360,6 +361,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func showDesktopVoiceSkills() {
         DispatchQueue.main.async { DesktopVoiceSkillsWindowController.shared.show() }
+    }
+
+    @objc private func showInsertionHistory() {
+        DispatchQueue.main.async {
+            InsertionHistoryWindowController.shared.show(controller: self.controller)
+        }
     }
 
     @objc private func resetBtrVoicePosition() {

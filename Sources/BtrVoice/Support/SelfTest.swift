@@ -671,6 +671,49 @@ enum SelfTest {
             check("user edits are kept", buffer.committedText == "typed by hand")
         }
 
+        print("InsertionHistory")
+        do {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("btrvoice-history-\(UUID().uuidString).json")
+            defer { try? FileManager.default.removeItem(at: url) }
+
+            let store = InsertionHistoryStore(fileURL: url, maximumEntries: 2)
+            store.record(
+                text: "first long dictation",
+                targetName: "Telegram",
+                send: false,
+                at: Date(timeIntervalSince1970: 1)
+            )
+            store.record(
+                text: "second long dictation",
+                targetName: "Messages",
+                send: true,
+                at: Date(timeIntervalSince1970: 2)
+            )
+            store.record(
+                text: "newest dictation",
+                targetName: nil,
+                send: false,
+                at: Date(timeIntervalSince1970: 3)
+            )
+
+            let reloaded = InsertionHistoryStore(fileURL: url, maximumEntries: 2)
+            check("history persists newest first",
+                  reloaded.entries.map(\.text) == ["newest dictation", "second long dictation"],
+                  "\(reloaded.entries.map(\.text))")
+            check("history keeps the original action and target",
+                  reloaded.entries.last?.sendsAfterInsertion == true
+                  && reloaded.entries.last?.targetName == "Messages")
+
+            do {
+                try reloaded.clear()
+                let cleared = InsertionHistoryStore(fileURL: url, maximumEntries: 2)
+                check("clear history persists", cleared.entries.isEmpty)
+            } catch {
+                check("clear history persists", false, error.localizedDescription)
+            }
+        }
+
         print("TextInjector.chunked")
         do {
             let line = String(repeating: "abcde ", count: 12)

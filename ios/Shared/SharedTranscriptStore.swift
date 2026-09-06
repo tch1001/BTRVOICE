@@ -8,6 +8,17 @@ struct SharedTranscript: Codable, Equatable {
   let committedAt: Date
 }
 
+struct SharedInsertionHistoryEntry: Codable, Equatable, Identifiable {
+  let id: UUID
+  let text: String
+  let insertedAt: Date
+}
+
+private struct SharedInsertionHistory: Codable {
+  let version: Int
+  var entries: [SharedInsertionHistoryEntry]
+}
+
 struct SharedLiveDraft: Codable, Equatable {
   let text: String
   let isListening: Bool
@@ -36,6 +47,7 @@ struct SharedKeyboardCommand: Codable, Equatable {
 
 enum SharedTranscriptStore {
   static let appGroupID = "group.com.tanchienhao.BtrVoice"
+  static let insertionHistoryLimit = 100
 
   private enum Key {
     static let text = "latestCommittedTranscript"
@@ -58,6 +70,12 @@ enum SharedTranscriptStore {
     FileManager.default
       .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
       .appendingPathComponent("keyboard-command.json", isDirectory: false)
+  }
+
+  private static var insertionHistoryFileURL: URL? {
+    FileManager.default
+      .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
+      .appendingPathComponent("insertion-history.json", isDirectory: false)
   }
 
   @discardableResult
@@ -118,6 +136,95 @@ enum SharedTranscriptStore {
     defaults?.removeObject(forKey: Key.text)
     defaults?.removeObject(forKey: Key.committedAt)
     defaults?.synchronize()
+  }
+
+  /// Records an explicit keyboard insertion before it is sent to the target app.
+  /// Keeping this separate from `save` means committing an edited draft does not
+  /// claim that the text was actually inserted.
+  @discardableResult
+  static func recordInsertion(_ rawText: String) -> SharedInsertionHistoryEntry? {
+    recordInsertion(rawText, at: Date(), to: insertionHistoryFileURL)
+  }
+
+  static func loadInsertionHistory() -> [SharedInsertionHistoryEntry] {
+    loadInsertionHistory(from: insertionHistoryFileURL)
+  }
+
+  static func deleteInsertionHistoryEntry(id: UUID) {
+    guard let insertionHistoryFileURL else { return }
+    var entries = loadInsertionHistory(from: insertionHistoryFileURL)
+    entries.removeAll { $0.id == id }
+    writeInsertionHistory(entries, to: insertionHistoryFileURL)
+  }
+
+  static func clearInsertionHistory() {
+    guard let insertionHistoryFileURL else { return }
+    try? FileManager.default.removeItem(at: insertionHistoryFileURL)
+  }
+
+  // File-injected variants keep persistence behavior testable without requiring
+  // an App Group container in the unit-test host.
+  @discardableResult
+  static func recordInsertion(
+    _ rawText: String,
+    at insertedAt: Date,
+    to fileURL: URL?
+  ) -> SharedInsertionHistoryEntry? {
+    let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty, let fileURL else { return nil }
+
+    let entry = SharedInsertionHistoryEntry(id: UUID(), text: text, insertedAt: insertedAt)
+    var entries = loadInsertionHistory(from: fileURL)
+    entries.insert(entry, at: 0)
+    if entries.count > insertionHistoryLimit {
+      entries.removeLast(entries.count - insertionHistoryLimit)
+    }
+    guard writeInsertionHistory(entries, to: fileURL) else { return nil }
+    return entry
+  }
+
+  static func loadInsertionHistory(from fileURL: URL?) -> [SharedInsertionHistoryEntry] {
+    guard
+      let fileURL,
+      let data = try? Data(contentsOf: fileURL),
+      let history = try? JSONDecoder().decode(SharedInsertionHistory.self, from: data),
+      history.version == 1
+    else {
+      return []
+    }
+    return history.entries
+      .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+      .sorted { $0.insertedAt > $1.insertedAt }
+  }
+
+  @discardableResult
+  static func writeInsertionHistory(
+    _ entries: [SharedInsertionHistoryEntry],
+    to fileURL: URL
+  ) -> Bool {
+    if entries.isEmpty {
+      try? FileManager.default.removeItem(at: fileURL)
+      return true
+    }
+
+    guard
+      let data = try? JSONEncoder().encode(
+        SharedInsertionHistory(version: 1, entries: Array(entries.prefix(insertionHistoryLimit)))
+      )
+    else {
+      return false
+    }
+
+    do {
+      try data.write(to: fileURL, options: .atomic)
+      try FileManager.default.setAttributes(
+        [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+        ofItemAtPath: fileURL.path
+      )
+      return true
+    } catch {
+      return false
+    }
   }
 
   static func clearLiveDraft() {
