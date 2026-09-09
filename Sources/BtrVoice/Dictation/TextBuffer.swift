@@ -10,8 +10,8 @@ final class TextBuffer: ObservableObject {
     @Published private(set) var text: String = ""
     /// Live in-flight recognition for the current segment, shown greyed out.
     @Published private(set) var partial: String = ""
-    /// Editor-mode streaming: the incoming full-transcript rewrite, shown in
-    /// place of everything while it streams. Nil outside editor responses.
+    /// Incoming editor prefix. Repeated prefixes must not erase words that the
+    /// response has not reached yet; destructive edits wait for the final result.
     @Published private(set) var replacementPreview: String?
     /// Bumped whenever `text` changes from *our* side, so the editor knows to reload
     /// without fighting the user's cursor on every keystroke.
@@ -20,7 +20,7 @@ final class TextBuffer: ObservableObject {
     private var undoStack: [String] = []
     private let undoLimit = 25
 
-    var isEmpty: Bool { text.isEmpty && partial.isEmpty }
+    var isEmpty: Bool { displayText.isEmpty }
 
     /// What would be typed if the user committed right now.
     var committedText: String { text }
@@ -33,7 +33,21 @@ final class TextBuffer: ObservableObject {
 
     /// Everything the user can see, live tail included.
     var displayText: String {
-        partial.isEmpty ? text : joined(text, partial)
+        let current = partial.isEmpty ? text : joined(text, partial)
+        // A full-transcript response starts by repeating the existing text. Keep
+        // that text on screen until the prefix catches up. Extensions can be shown
+        // immediately; ambiguous corrections stay pending until the complete
+        // replacement arrives, so an unfinished prefix never looks like deletion.
+        if let preview = replacementPreview, preview.hasPrefix(current) {
+            return preview
+        }
+        return current
+    }
+
+    /// What follows the confirmed prefix in the editor, including model output
+    /// received before input transcription. It stays grey until confirmation.
+    var displayedUnconfirmedSuffix: String {
+        String(displayText.dropFirst(text.count))
     }
 
     // MARK: - Speech input
@@ -45,8 +59,14 @@ final class TextBuffer: ObservableObject {
     }
 
     func setReplacementPreview(_ value: String?) {
-        guard value != replacementPreview else { return }
-        replacementPreview = value
+        // A transport cleanup is not confirmation. Retain the last visible prefix
+        // through tool-only replies, cancellation and timeouts. Explicit buffer
+        // clear/adoption/finalization owns its removal.
+        guard let value, !value.isEmpty else { return }
+        let visible = displayText
+        let next = value.hasPrefix(visible) ? value : (replacementPreview ?? "")
+        guard next != replacementPreview else { return }
+        replacementPreview = next
     }
 
     /// Applies a finalised segment. Returns any actions the buffer can't perform
@@ -89,6 +109,7 @@ final class TextBuffer: ObservableObject {
     func adoptDisplayedText(_ value: String) {
         text = value
         partial = ""
+        replacementPreview = nil
     }
 
     /// One press of the backspace button. Whole grapheme clusters at a time, so an
@@ -120,10 +141,12 @@ final class TextBuffer: ObservableObject {
         revision += 1
     }
 
-    func replace(with value: String) {
-        pushUndo()
-        text = value
-        partial = ""
+    func replace(with value: String, remainingPartial: String = "") {
+        if text != value {
+            pushUndo()
+            text = value
+        }
+        partial = remainingPartial.trimmingCharacters(in: .whitespacesAndNewlines)
         replacementPreview = nil
         revision += 1
     }
@@ -150,6 +173,7 @@ final class TextBuffer: ObservableObject {
         guard let previous = undoStack.popLast() else { return }
         text = previous
         partial = ""
+        replacementPreview = nil
         revision += 1
     }
 

@@ -565,6 +565,8 @@ enum SelfTest {
                   && !JarvisEngine.wants(.clipboard, in: "Jarvis, make that more formal"))
         }
 
+        failures += StreamingEditorSelfTest.run()
+
         print("TextBuffer")
         do {
             let buffer = TextBuffer()

@@ -148,13 +148,12 @@ struct DictationPanelView: View {
     private var transcript: some View {
         HStack(spacing: 0) {
             ZStack {
-                // While the editor streams a full-transcript rewrite, show it as the
-                // in-flight (grey) text in place of everything else.
+                // Keep the confirmed prefix and pending words in the same text
+                // storage while the editor catches up with its full rewrite.
                 BufferTextView(
-                    text: buffer.replacementPreview == nil ? buffer.text : "",
-                    partial: buffer.replacementPreview ?? buffer.partial,
+                    text: buffer.text,
+                    partial: buffer.displayedUnconfirmedSuffix,
                     revision: buffer.revision,
-                    commitPending: controller.isCommitPending,
                     placeholder: "Dictated text stages here. Nothing is typed into the app until you insert it.",
                     onEdit: { buffer.userDidEdit($0) },
                     onAdoptAll: { controller.adoptEditedText($0) },

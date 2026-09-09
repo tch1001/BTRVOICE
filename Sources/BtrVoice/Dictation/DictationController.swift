@@ -682,47 +682,20 @@ final class DictationController: ObservableObject {
             }
             editor.onReplacementPreview = { [weak self] preview in
                 guard let self, !self.inputOnHold else { return }
-                // Once Insert/Send has been requested, the editor still completes
-                // its final rewrite internally, but repainting that entire rewrite
-                // token-by-token in grey only makes the commit look slow. Freeze the
-                // last visible preview; response.done applies the confirmed text in
-                // one step immediately before the pending commit consumes it.
-                guard preview == nil || self.pendingCommit == nil else { return }
                 self.buffer.setReplacementPreview(preview)
+            }
+            editor.onEditorFinal = { [weak self] text, remainingPartial in
+                self?.applyEditorTranscript(text, remainingPartial: remainingPartial)
             }
         }
         engine.onSegmentFinal = { [weak self, weak engine] text in
             guard let self else { return }
 
             // Editor-style engines deliver the complete intended transcript:
-            // replace the buffer wholesale. Spoken commands arrive as [[cmd:…]]
+            // update the confirmed snapshot. Spoken commands arrive as [[cmd:…]]
             // markers the editor was instructed to emit instead of prose.
             if engine?.replacesBuffer == true {
-                let (cleaned, commands) = VoiceCommands.extractEditorCommands(text)
-                let applyFinalEditorSegment = {
-                    // Most command countdowns freeze the staged text. Insert/send
-                    // are different: their entire purpose is to consume the final
-                    // buffer, so the editor's last rewrite must still land.
-                    if let pending = self.pendingCommand,
-                       !pending.action.requiresFinalizedBuffer {
-                        Log.write("segment dropped — command countdown active")
-                        return
-                    }
-                    if !cleaned.isEmpty || commands.isEmpty {
-                        self.buffer.replace(with: cleaned)
-                    }
-                    if let command = commands.first {
-                        self.stagePendingCommand(command)
-                    }
-                }
-                // Editor callbacks already arrive on main. Applying immediately is
-                // essential: onFinished may follow as soon as this callback returns,
-                // and a second async hop would let it snapshot the old/empty buffer.
-                if Thread.isMainThread {
-                    applyFinalEditorSegment()
-                } else {
-                    DispatchQueue.main.async(execute: applyFinalEditorSegment)
-                }
+                self.applyEditorTranscript(text, remainingPartial: "")
                 return
             }
 
@@ -782,6 +755,25 @@ final class DictationController: ObservableObject {
         showPanel?()
         if settings.followCaret { repositionPanel?() }
         startPolicyTimer()
+    }
+
+    private func applyEditorTranscript(_ text: String, remainingPartial: String) {
+        let apply = { [self] in
+            if let pending = pendingCommand, !pending.action.requiresFinalizedBuffer {
+                Log.write("segment dropped — command countdown active")
+                return
+            }
+            let (cleaned, commands) = VoiceCommands.extractEditorCommands(text)
+            // A command-only reply consumes that spoken command, not the staged
+            // transcript. Resolve its grey tail while retaining newer speech.
+            let confirmed = cleaned.isEmpty && !commands.isEmpty ? buffer.text : cleaned
+            buffer.replace(with: confirmed, remainingPartial: remainingPartial)
+            if let command = commands.first { stagePendingCommand(command) }
+        }
+        // Deliver the completed text and the newer pending suffix together before
+        // onFinished can examine the buffer. Never queue a second main-thread hop.
+        if Thread.isMainThread { apply() }
+        else { DispatchQueue.main.async(execute: apply) }
     }
 
     private func handleRecognitionFinished() {

@@ -1,36 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// The single staging editor. Committed text and the live in-flight tail share one
-/// text view: committed is normal label-coloured text the user can edit freely —
-/// select, retype, cursor anywhere — while the tail is rendered grey at the end and
-/// is owned by the recogniser until it finalises (at which point it simply turns
-/// into normal text in place).
-///
-/// If the user edits *into* the grey region, the whole visible text becomes theirs:
-/// `onAdoptAll` fires, and the controller tells the engine to discard the utterance
-/// so the recogniser can't finish it later and duplicate words.
+/// Confirmed text and the pending suffix share one native editor. Cloud snapshots
+/// are applied as small edits; confirmation recolours existing glyphs in place.
 struct BufferTextView: NSViewRepresentable {
-
     let text: String
+    /// Exact suffix (including its separator), as presented by TextBuffer.
     let partial: String
     let revision: Int
-    /// A commit has already been requested. The suffix is still recognizer-owned,
-    /// but showing it grey while the final response drains makes the app appear to
-    /// be transcribing again instead of completing the user's click.
-    let commitPending: Bool
     let placeholder: String
     let onEdit: (String) -> Void
     let onAdoptAll: (String) -> Void
     let onCommit: () -> Void
     let onCancel: () -> Void
-
-    /// The grey suffix as it appears in the view: separator + partial.
-    private var partialSuffix: String {
-        guard !partial.isEmpty else { return "" }
-        guard let last = text.last, !last.isWhitespace else { return partial }
-        return " " + partial
-    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onEdit: onEdit, onAdoptAll: onAdoptAll)
@@ -64,12 +46,7 @@ struct BufferTextView: NSViewRepresentable {
         scroll.autohidesScrollers = true
 
         context.coordinator.textView = textView
-        context.coordinator.reload(
-            committed: text,
-            suffix: partialSuffix,
-            revision: revision,
-            commitPending: commitPending
-        )
+        context.coordinator.update(committed: text, suffix: partial, revision: revision)
         return scroll
     }
 
@@ -80,36 +57,15 @@ struct BufferTextView: NSViewRepresentable {
         textView.onCancel = onCancel
         context.coordinator.onEdit = onEdit
         context.coordinator.onAdoptAll = onAdoptAll
-
-        if context.coordinator.appliedRevision != revision {
-            // Committed text changed on our side (segment landed, clear, undo…):
-            // rebuild the whole view content.
-            context.coordinator.reload(
-                committed: text,
-                suffix: partialSuffix,
-                revision: revision,
-                commitPending: commitPending
-            )
-        } else if context.coordinator.displayedSuffix != partialSuffix {
-            // Only the live tail moved: surgically replace the grey suffix so the
-            // user's cursor and selection in the committed region stay put.
-            context.coordinator.replaceSuffix(with: partialSuffix, commitPending: commitPending)
-        } else if context.coordinator.displayedSuffixCommitPending != commitPending {
-            context.coordinator.restyleSuffix(commitPending: commitPending)
-        }
+        context.coordinator.update(committed: text, suffix: partial, revision: revision)
     }
-
-    // MARK: - Coordinator
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var onEdit: (String) -> Void
         var onAdoptAll: (String) -> Void
-        var appliedRevision: Int = -1
-        /// Exactly what the grey region currently shows, separator included.
-        var displayedSuffix: String = ""
-        var displayedSuffixCommitPending = false
+        var appliedRevision = -1
+        var displayedSuffix = ""
         weak var textView: NSTextView?
-        /// True while we mutate the view programmatically, so textDidChange ignores it.
         private var mutating = false
 
         init(onEdit: @escaping (String) -> Void, onAdoptAll: @escaping (String) -> Void) {
@@ -117,123 +73,86 @@ struct BufferTextView: NSViewRepresentable {
             self.onAdoptAll = onAdoptAll
         }
 
-        private static let partialAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14),
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]
         private static let committedAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 14),
             .foregroundColor: NSColor.labelColor,
         ]
 
-        func reload(committed: String, suffix: String, revision: Int, commitPending: Bool) {
-            guard let textView else { return }
-            appliedRevision = revision
-            displayedSuffix = suffix
-            displayedSuffixCommitPending = commitPending
-
-            let wasAtEnd = textView.selectedRange().location >= (textView.string as NSString).length
-            let content = NSMutableAttributedString(string: committed, attributes: Self.committedAttributes)
-            content.append(NSAttributedString(
-                string: suffix,
-                attributes: commitPending ? Self.committedAttributes : Self.partialAttributes
-            ))
-
-            mutating = true
-            textView.textStorage?.setAttributedString(content)
-            textView.typingAttributes = Self.committedAttributes
-            mutating = false
-
-            if wasAtEnd {
-                let end = content.length
-                textView.setSelectedRange(NSRange(location: end, length: 0))
-                textView.scrollRangeToVisible(NSRange(location: end, length: 0))
-            }
-            textView.needsDisplay = true
-        }
-
-        func replaceSuffix(with newSuffix: String, commitPending: Bool) {
+        func update(committed: String, suffix: String, revision: Int) {
             guard let textView, let storage = textView.textStorage else { return }
-            let full = textView.string as NSString
-            let oldLength = (displayedSuffix as NSString).length
-
-            // The grey region must still be intact at the end; if not, fall back to a
-            // full reload on the next revision rather than corrupting user text.
-            guard full.length >= oldLength,
-                  full.substring(from: full.length - oldLength) == displayedSuffix
-            else {
-                displayedSuffix = newSuffix
+            let previous = textView.string
+            let content = committed + suffix
+            guard !previous.utf8.elementsEqual(content.utf8) || displayedSuffix != suffix else {
+                appliedRevision = revision
                 return
             }
 
-            let range = NSRange(location: full.length - oldLength, length: oldLength)
-            let selection = textView.selectedRange()
-            let followTail = selection.location >= range.location && selection.length == 0
+            let selections = textView.selectedRanges.map(\.rangeValue)
+            let previousLength = previous.utf16.count
+            let caretAtEnd = selections.count == 1
+                && selections[0] == NSRange(location: previousLength, length: 0)
+            let wasAtBottom = textView.enclosingScrollView.map {
+                $0.documentVisibleRect.maxY >= textView.bounds.maxY - 24
+            } ?? true
+            let update = TranscriptTextUpdate(from: previous, to: content)
 
             mutating = true
-            storage.replaceCharacters(
-                in: range,
-                with: NSAttributedString(
-                    string: newSuffix,
-                    attributes: commitPending ? Self.committedAttributes : Self.partialAttributes
+            storage.beginEditing()
+            for edit in update.edits.reversed() {
+                storage.replaceCharacters(
+                    in: edit.range,
+                    with: NSAttributedString(string: edit.replacement, attributes: Self.committedAttributes)
                 )
-            )
-            textView.typingAttributes = Self.committedAttributes
-            mutating = false
-
-            displayedSuffix = newSuffix
-            displayedSuffixCommitPending = commitPending
-            let end = (textView.string as NSString).length
-            if followTail {
-                textView.setSelectedRange(NSRange(location: end, length: 0))
             }
-            textView.scrollRangeToVisible(NSRange(location: end, length: 0))
-            textView.needsDisplay = true
+            // Recolour only runs that actually changed state. Identical grey text
+            // becoming confirmed is an attribute edit, never a text replacement.
+            recolour(storage, range: NSRange(location: 0, length: committed.utf16.count),
+                     color: .labelColor)
+            recolour(storage, range: NSRange(location: committed.utf16.count, length: suffix.utf16.count),
+                     color: .secondaryLabelColor)
+            storage.endEditing()
+            textView.typingAttributes = Self.committedAttributes
+            if !update.edits.isEmpty {
+                if caretAtEnd {
+                    textView.setSelectedRange(NSRange(location: storage.length, length: 0))
+                } else {
+                    textView.selectedRanges = selections.map { NSValue(range: update.selection(after: $0)) }
+                }
+                if caretAtEnd && wasAtBottom {
+                    textView.scrollRangeToVisible(NSRange(location: storage.length, length: 0))
+                }
+            }
+            displayedSuffix = suffix
+            appliedRevision = revision
+            mutating = false
+            if previous.isEmpty != content.isEmpty { textView.needsDisplay = true }
         }
 
-        func restyleSuffix(commitPending: Bool) {
-            guard let textView, let storage = textView.textStorage else { return }
-            let full = textView.string as NSString
-            let suffixLength = (displayedSuffix as NSString).length
-            guard suffixLength > 0, full.length >= suffixLength,
-                  full.substring(from: full.length - suffixLength) == displayedSuffix
-            else {
-                displayedSuffixCommitPending = commitPending
-                return
+        private func recolour(_ storage: NSTextStorage, range: NSRange, color: NSColor) {
+            guard range.length > 0 else { return }
+            var changes: [NSRange] = []
+            storage.enumerateAttribute(.foregroundColor, in: range) { value, run, _ in
+                if (value as? NSColor) != color { changes.append(run) }
             }
-
-            let range = NSRange(location: full.length - suffixLength, length: suffixLength)
-            mutating = true
-            storage.setAttributes(
-                commitPending ? Self.committedAttributes : Self.partialAttributes,
-                range: range
-            )
-            textView.typingAttributes = Self.committedAttributes
-            mutating = false
-            displayedSuffixCommitPending = commitPending
-            textView.needsDisplay = true
+            for run in changes { storage.addAttribute(.foregroundColor, value: color, range: run) }
         }
 
         func textDidChange(_ notification: Notification) {
             guard !mutating, let textView = notification.object as? NSTextView else { return }
-            let s = textView.string
-
+            let value = textView.string
             if displayedSuffix.isEmpty {
-                onEdit(s)
-            } else if s.hasSuffix(displayedSuffix) {
-                // Edit stayed within the committed region.
-                onEdit(String(s.dropLast(displayedSuffix.count)))
+                onEdit(value)
+            } else if value.hasSuffix(displayedSuffix) {
+                onEdit(String(value.dropLast(displayedSuffix.count)))
             } else {
-                // The user reached into the live grey text: it's all theirs now.
                 displayedSuffix = ""
                 mutating = true
-                textView.textStorage?.setAttributes(
-                    Self.committedAttributes,
-                    range: NSRange(location: 0, length: (s as NSString).length)
-                )
+                if let storage = textView.textStorage {
+                    recolour(storage, range: NSRange(location: 0, length: storage.length), color: .labelColor)
+                }
                 textView.typingAttributes = Self.committedAttributes
                 mutating = false
-                onAdoptAll(s)
+                onAdoptAll(value)
             }
             textView.needsDisplay = true
         }
