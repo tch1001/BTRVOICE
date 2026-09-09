@@ -43,6 +43,7 @@ enum TextInjector {
         mode: InjectionMode,
         newlineMode: NewlineMode,
         pressReturnAfter: Bool,
+        isCancelled: @escaping () -> Bool = { false },
         completion: @escaping (Result<Void, InjectionError>) -> Void
     ) {
         guard AXIsProcessTrusted() else {
@@ -75,6 +76,10 @@ enum TextInjector {
                 return
             }
 
+            if isCancelled() {
+                DispatchQueue.main.async { restore?(); completion(.failure(.cancelled)) }
+                return
+            }
             if !text.isEmpty {
                 switch resolved {
                 case .paste:
@@ -82,18 +87,22 @@ enum TextInjector {
                     // The receiving app reads the pasteboard asynchronously.
                     usleep(250_000)
                 case .typing, .auto:
-                    typeOut(text, newlineMode: newlineMode, source: source)
+                    typeOut(text, newlineMode: newlineMode, source: source, isCancelled: isCancelled)
                 }
             }
 
+            if isCancelled() {
+                DispatchQueue.main.async { restore?(); completion(.failure(.cancelled)) }
+                return
+            }
             if pressReturnAfter {
                 usleep(30_000)
-                postKey(returnKeyCode, flags: [], source: source)
+                if !isCancelled() { postKey(returnKeyCode, flags: [], source: source) }
             }
 
             DispatchQueue.main.async {
                 restore?()
-                completion(.success(()))
+                completion(isCancelled() ? .failure(.cancelled) : .success(()))
             }
         }
     }
@@ -203,12 +212,13 @@ enum TextInjector {
 
     /// Presses an arbitrary chord in the frontmost app — every modifier goes
     /// down as its own event first, for apps that watch flagsChanged.
-    static func pressCombo(key: CGKeyCode, flags: CGEventFlags, completion: @escaping (Result<Void, InjectionError>) -> Void) {
+    static func pressCombo(key: CGKeyCode, flags: CGEventFlags, isCancelled: @escaping () -> Bool = { false }, completion: @escaping (Result<Void, InjectionError>) -> Void) {
         pressCombo(
             key: key,
             flags: flags,
             sourceState: .privateState,
             activationDelay: 80_000,
+            isCancelled: isCancelled,
             completion: completion
         )
     }
@@ -236,6 +246,7 @@ enum TextInjector {
         flags: CGEventFlags,
         sourceState: CGEventSourceStateID,
         activationDelay: useconds_t,
+        isCancelled: @escaping () -> Bool = { false },
         completion: @escaping (Result<Void, InjectionError>) -> Void
     ) {
         guard AXIsProcessTrusted() else {
@@ -251,6 +262,10 @@ enum TextInjector {
                 // General command execution may have activated its target just now;
                 // give the window server a beat so that chord lands after it is key.
                 usleep(activationDelay)
+            }
+            guard !isCancelled() else {
+                DispatchQueue.main.async { completion(.failure(.cancelled)) }
+                return
             }
             let modifierKeys: [(CGEventFlags, CGKeyCode)] = [
                 (.maskControl, controlKeyCode), (.maskAlternate, 58),
@@ -302,11 +317,12 @@ enum TextInjector {
 
     // MARK: - Typing
 
-    private static func typeOut(_ text: String, newlineMode: NewlineMode, source: CGEventSource) {
+    private static func typeOut(_ text: String, newlineMode: NewlineMode, source: CGEventSource, isCancelled: () -> Bool) {
         // Split on newlines so each one can become a real key press; apps disagree
         // wildly about whether a literal \n in a unicode payload means anything.
         let lines = text.components(separatedBy: "\n")
         for (index, line) in lines.enumerated() {
+            guard !isCancelled() else { return }
             if index > 0 {
                 switch newlineMode {
                 case .returnKey:
@@ -319,6 +335,7 @@ enum TextInjector {
                 usleep(interKeyDelay)
             }
             for chunk in chunked(line) {
+                guard !isCancelled() else { return }
                 if chunk == "\t" {
                     postKey(tabKeyCode, flags: [], source: source)
                 } else {
@@ -437,9 +454,12 @@ enum TextInjector {
     enum InjectionError: LocalizedError {
         case notTrusted
         case eventSourceUnavailable
+        case cancelled
 
         var errorDescription: String? {
             switch self {
+            case .cancelled:
+                return "Text entry was interrupted; remaining characters were not sent."
             case .notTrusted:
                 return "Accessibility access is required to type into other apps."
             case .eventSourceUnavailable:

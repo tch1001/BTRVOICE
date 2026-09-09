@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.startSession()
+        DesktopVoiceHistoryStore.shared.prepareExport()
         PermissionMonitor.shared.start()
         Log.write("permissions: \(PermissionMonitor.shared.summary)")
 
@@ -99,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotkeyManager.shared.unregister()
         VirtualKeyboardController.shared.shutdown()
         DesktopVoiceCoordinator.shared.shutdown()
+        DesktopVoiceHistoryStore.shared.trace.flush()
         JarvisVoiceService.shared.shutdown()
     }
 

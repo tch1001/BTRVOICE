@@ -67,6 +67,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             action: #selector(toggleDesktopVoice)
         ))
         menu.addItem(item("Voice Control Skills…", action: #selector(showDesktopVoiceSkills)))
+        menu.addItem(item("Voice Control History…", action: #selector(showDesktopVoiceHistory)))
 
         // An on-screen keyboard, like macOS's Accessibility Keyboard: clickable keys
         // that type into whatever app has focus.
@@ -361,6 +362,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func showDesktopVoiceSkills() {
         DispatchQueue.main.async { DesktopVoiceSkillsWindowController.shared.show() }
+    }
+
+    @objc private func showDesktopVoiceHistory() {
+        DispatchQueue.main.async { DesktopVoiceHistoryWindowController.shared.show() }
     }
 
     @objc private func showInsertionHistory() {

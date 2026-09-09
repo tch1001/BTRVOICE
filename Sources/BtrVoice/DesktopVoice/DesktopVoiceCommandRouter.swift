@@ -17,6 +17,7 @@ enum DesktopVoiceAction: Equatable {
 struct DesktopVoicePlan: Equatable {
     let summary: String
     let actions: [DesktopVoiceAction]
+    var continueAfter = false
 }
 
 /// User-facing metadata for one deterministic command family. The router and the
@@ -36,6 +37,7 @@ struct DesktopVoiceFastPath: Identifiable, Equatable {
 enum DesktopVoiceRouteResult: Equatable {
     case plan(DesktopVoicePlan)
     case answer(String)
+    case readScreen
     case unsupported(String)
 }
 
@@ -74,7 +76,11 @@ struct DesktopVoiceCommandRouter {
             return "\(index + 1). \(path.title) — \(path.action). Say: \(spoken)"
         }
         return (["I currently have \(fastPaths.count) local fast paths:"] + rows + [
+            "You can say ‘Read my screen’ or ask about the visible page or error. Screen reading uses one snapshot and may need macOS Screen Recording access.",
+            "I can use exposed Accessibility controls: press buttons, select tabs and rows, open menus, adjust sliders and scroll bars, focus fields, and move or resize windows. Multi-step requests can act, read the result, and continue.",
+            "Say ‘Summarize my unread Telegram messages, especially DMs’ or ‘Summarize my browser tabs by topic’. Local reading batches collect exposed items before one model summary. Opening chats may mark them read; hidden content may be unavailable. Preview-only lists do not open chats or tabs.",
             "You can also ask how to use BtrVoice. Commands outside this list go to the model-backed slow path.",
+            "Speak naturally: exact phrases are optional shortcuts. I infer supported actions from your request and recent conversation. Ask to see saved Voice Control history, or use the clock menu.",
         ]).joined(separator: "\n")
     }
 
@@ -125,6 +131,8 @@ struct DesktopVoiceCommandRouter {
             return shortcutPlan(summary: rule.summary, combo: rule.combo)
         }
 
+        if Self.screenCommands.contains(command) { return .readScreen }
+
         guard let remainder = Self.strippingLaunchVerb(from: command) else {
             return .unsupported("That isn't in the fast command set yet.")
         }
@@ -164,6 +172,13 @@ struct DesktopVoiceCommandRouter {
     }
 
     private static let launchVerbs = ["open ", "launch ", "start "]
+
+    private static let screenCommands: Set<String> = [
+        "read my screen", "read the screen", "read this screen", "describe my screen",
+        "describe the screen", "can you read my screen", "can you see my screen",
+        "what is on my screen", "what's on my screen", "what am i looking at",
+        "summarize my screen", "summarise my screen",
+    ]
 
     private static func isHelpQuestion(_ command: String) -> Bool {
         if helpCommands.contains(command) { return true }

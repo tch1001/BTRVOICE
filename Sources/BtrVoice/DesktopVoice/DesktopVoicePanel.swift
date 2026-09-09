@@ -8,6 +8,7 @@ private struct DesktopVoicePanelView: View {
     private static let activityBottomID = "desktop-voice-activity-bottom"
 
     @ObservedObject var coordinator: DesktopVoiceCoordinator
+    @ObservedObject private var history = DesktopVoiceHistoryStore.shared
     @State private var manualCommand = ""
 
     var body: some View {
@@ -19,6 +20,20 @@ private struct DesktopVoicePanelView: View {
                     Divider().opacity(0.5)
                     activity
                     Divider().opacity(0.5)
+                    if let draft = coordinator.preparedText {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Text ready to insert").font(.caption.bold())
+                            ScrollView { Text(draft.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                                .frame(maxHeight: 90)
+                            HStack {
+                                Button("Insert") { coordinator.insertDraft(send: false) }
+                                Button("Insert & Enter") { coordinator.insertDraft(send: true) }
+                                Spacer()
+                                Button("Discard") { coordinator.discardDraft() }
+                            }
+                        }.padding(10)
+                        Divider().opacity(0.5)
+                    }
                     commandBar
                 }
                 .frame(
@@ -57,7 +72,7 @@ private struct DesktopVoicePanelView: View {
                 .buttonStyle(.plain)
                 .help(coordinator.isListening ? "Stop voice control" : "Start voice control")
 
-                WaveformView(level: coordinator.level, active: coordinator.isListening)
+                LiveWaveformView(meter: coordinator.microphoneMeter, active: coordinator.isListening)
                     .frame(width: 72)
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -73,6 +88,20 @@ private struct DesktopVoicePanelView: View {
                 }
 
                 Spacer(minLength: 4)
+
+                Menu {
+                    Button("Browse saved history…") { DesktopVoiceHistoryWindowController.shared.show() }
+                    Divider()
+                    ForEach(history.recentTranscripts) { entry in
+                        Button(String(entry.text.prefix(65))) { manualCommand = entry.text }
+                    }
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Recent transcripts — select one to put it in the command field without running it")
 
                 Button {
                     DesktopVoiceSkillsWindowController.shared.show()
@@ -92,7 +121,7 @@ private struct DesktopVoicePanelView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("Clear voice context and activity")
+                .help("Clear the current conversation; saved history remains")
 
                 Button {
                     DesktopVoiceWindowController.shared.stopAndHide()
@@ -114,11 +143,23 @@ private struct DesktopVoicePanelView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
+                    if let error = history.saveError {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                    }
+                    if coordinator.activities.isEmpty, !history.recentTranscripts.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Recent transcripts").font(.caption.bold()).foregroundStyle(.secondary)
+                            ForEach(history.recentTranscripts.prefix(3)) { entry in
+                                Text(entry.text).font(.caption).lineLimit(2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
                     if coordinator.activities.isEmpty, coordinator.partialTranscript.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Label("Try “What can you do?”", systemImage: "text.bubble.fill")
                                 .font(.system(size: 13, weight: .semibold))
-                            Text("Or say “Open Brave and create a new tab.” Familiar commands run locally; questions use the interactive slow path.")
+                            Text("Or say “Open Brave and create a new tab” or “Read my screen.” Familiar commands run locally; questions use the interactive slow path.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -174,9 +215,16 @@ private struct DesktopVoicePanelView: View {
                 .foregroundStyle(color(for: entry.kind))
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.title)
-                    .font(.system(size: 12.5, weight: entry.kind == .heard ? .regular : .medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Group {
+                    if entry.kind == .answer {
+                        DesktopVoiceReplyText(entry.title, fontSize: 12.5)
+                            .equatable()
+                    } else {
+                        Text(entry.title)
+                            .font(.system(size: 12.5, weight: entry.kind == .heard ? .regular : .medium))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if let detail = entry.detail {
                     Text(detail)
                         .font(.caption2)

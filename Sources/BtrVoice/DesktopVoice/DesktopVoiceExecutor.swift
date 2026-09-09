@@ -16,6 +16,7 @@ final class DesktopVoiceExecutor {
     func execute(
         _ plan: DesktopVoicePlan,
         preferredTarget: NSRunningApplication?,
+        isCancelled: @escaping () -> Bool = { false },
         completion: @escaping (Result<DesktopVoiceExecutionResult, Error>) -> Void
     ) {
         execute(
@@ -23,6 +24,7 @@ final class DesktopVoiceExecutor {
             index: 0,
             target: usable(preferredTarget),
             finalMessage: plan.summary,
+            isCancelled: isCancelled,
             completion: completion
         )
     }
@@ -32,8 +34,10 @@ final class DesktopVoiceExecutor {
         index: Int,
         target: NSRunningApplication?,
         finalMessage: String,
+        isCancelled: @escaping () -> Bool,
         completion: @escaping (Result<DesktopVoiceExecutionResult, Error>) -> Void
     ) {
+        guard !isCancelled() else { completion(.failure(CancellationError())); return }
         guard index < actions.count else {
             completion(.success(DesktopVoiceExecutionResult(message: finalMessage, target: target)))
             return
@@ -53,6 +57,7 @@ final class DesktopVoiceExecutor {
                             index: index + 1,
                             target: launched,
                             finalMessage: finalMessage,
+                            isCancelled: isCancelled,
                             completion: completion
                         )
                     }
@@ -74,7 +79,7 @@ final class DesktopVoiceExecutor {
             if let resolvedTarget, !resolvedTarget.isActive {
                 resolvedTarget.activate(options: [])
             }
-            TextInjector.pressCombo(key: parsed.key, flags: parsed.flags) { [weak self] result in
+            TextInjector.pressCombo(key: parsed.key, flags: parsed.flags, isCancelled: isCancelled) { [weak self] result in
                 guard let self else { return }
                 switch result {
                 case .failure(let error):
@@ -85,6 +90,7 @@ final class DesktopVoiceExecutor {
                         index: index + 1,
                         target: resolvedTarget,
                         finalMessage: finalMessage,
+                        isCancelled: isCancelled,
                         completion: completion
                     )
                 }

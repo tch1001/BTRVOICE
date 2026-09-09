@@ -21,6 +21,7 @@ enum SelfTest {
             }
         }
 
+
         print("VoiceCommands")
         do {
             let actions = VoiceCommands.parse("hello world do paste goodbye", enabled: true)
@@ -200,6 +201,11 @@ enum SelfTest {
                   router.route("How do I add a new fast path command?")
                     == .answer(DesktopVoiceCommandRouter.addingFastPathsAnswer))
 
+            for question in ["Read my screen!", "Can you read my screen?", "What am I looking at?"] {
+                check("a spoken screen question requests a fresh capture: \(question)",
+                      router.route(question) == .readScreen)
+            }
+
             let learnedSkill = DesktopVoiceLearnedSkill(
                 id: UUID(),
                 name: "Rescue tab",
@@ -242,6 +248,79 @@ enum SelfTest {
             )
             check("the slow path reads conversational answers",
                   answerDecision == .answer("Hard Submit sends the current command immediately."))
+
+            let screenCall: [String: Any] = ["output": [[
+                "type": "function_call", "name": "read_current_screen", "arguments": "{}",
+            ]]]
+            check("the model can request screen reading without a desktop action",
+                  (try? DesktopVoiceAssistant.interpret(screenCall, resolveApplication: resolveApplication)) == .readScreen)
+            let invalidScreenCall: [String: Any] = ["output": [[
+                "type": "function_call", "name": "read_current_screen", "arguments": "{\"action\":\"click\"}",
+            ]]]
+            check("a screen request cannot smuggle in an action",
+                  (try? DesktopVoiceAssistant.interpret(invalidScreenCall, resolveApplication: resolveApplication)) == nil)
+
+            let context = DesktopVoiceAssistant.Context(targetName: "Brave", recentActivity: [])
+            let ordinaryRequest = DesktopVoiceAssistant.requestBody(
+                utterance: "Open Brave", context: context, screen: nil, learnedSkills: []
+            )
+            check("ordinary commands retain text input and existing action tools",
+                  ordinaryRequest["input"] is String
+                    && ((ordinaryRequest["tools"] as? [[String: Any]])?.contains { $0["name"] as? String == "run_desktop_plan" } == true))
+            let snapshot = DesktopScreenSnapshot(jpeg: Data([1, 2, 3]), width: 1600, height: 900,
+                                                 displayID: 1, application: "Brave", capturedAt: Date())
+            let screenRequest = DesktopVoiceAssistant.requestBody(
+                utterance: "Explain this error", context: context, screen: snapshot, learnedSkills: []
+            )
+            let screenInput = screenRequest["input"] as? [[String: Any]]
+            let screenContent = screenInput?.last?["content"] as? [[String: Any]]
+            check("the vision model receives image bytes as an image rather than tool-output text",
+                  screenContent?.last?["type"] as? String == "input_image"
+                    && screenContent?.last?["image_url"] as? String == "data:image/jpeg;base64,AQID")
+            check("screen interpretation cannot execute actions or save skills",
+                  (screenRequest["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String } == ["inspect_ui", "wait_ui"]
+                    && screenRequest["tool_choice"] as? String == "auto"
+                    && screenRequest["store"] as? Bool == false)
+            check("ordinary requests and vision requests both encode as valid JSON",
+                  JSONSerialization.isValidJSONObject(ordinaryRequest) && JSONSerialization.isValidJSONObject(screenRequest))
+            var accessibleSnapshot = DesktopScreenSnapshot(jpeg: nil, width: 0, height: 0,
+                displayID: 0, application: "Brave", capturedAt: Date())
+            accessibleSnapshot.accessibility = DesktopAccessibilityContext(
+                text: "AXButton: Save | available actions: AXPress", elementCount: 1, truncated: false)
+            let accessibleRequest = DesktopVoiceAssistant.requestBody(
+                utterance: "Which buttons are here?", context: context, screen: accessibleSnapshot, learnedSkills: [])
+            let accessibleInput = accessibleRequest["input"] as? [[String: Any]]
+            let accessibleContent = accessibleInput?.last?["content"] as? [[String: Any]]
+            check("structured screen questions send labels before any image bytes",
+                  accessibleContent?.count == 1
+                    && (accessibleContent?.first?["text"] as? String)?.contains("AXButton: Save") == true)
+            check("structured reading may inspect more UI or request an image without action tools",
+                  (accessibleRequest["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String } == ["inspect_ui", "wait_ui", "read_screen_image"])
+            accessibleSnapshot.imageUnavailable = "Screen Recording access is required."
+            let deniedImageRequest = DesktopVoiceAssistant.requestBody(
+                utterance: "Describe this chart", context: context, screen: accessibleSnapshot, learnedSkills: [])
+            check("a denied image cannot cause a repeated screenshot request loop",
+                  (deniedImageRequest["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String } == ["inspect_ui", "wait_ui"])
+            let button = DesktopAccessibilityReader.describe(role: "AXButton", label: "Save", value: nil,
+                actions: ["AXPress"], enabled: false, secure: false)
+            check("accessibility preserves a button's exact label, action, and disabled state",
+                  button.contains("Save") && button.contains("AXPress") && button.contains("disabled"))
+            let password = DesktopAccessibilityReader.describe(role: "AXTextField", label: "secret-label",
+                value: "secret-value", actions: [], enabled: true, secure: true)
+            check("protected accessibility fields never expose their label or value",
+                  !password.contains("secret-label") && !password.contains("secret-value"))
+            let monitors = [CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                            CGRect(x: -1920, y: -1080, width: 1920, height: 1080)]
+            check("screen capture follows the active window onto a display with negative coordinates",
+                  DesktopScreenReader.displayIndex(frames: monitors,
+                    window: CGRect(x: -1800, y: -1000, width: 1000, height: 800), mainIndex: 0) == 1)
+            check("an unavailable window falls back to the main display",
+                  DesktopScreenReader.displayIndex(frames: monitors, window: nil, mainIndex: 0) == 0)
+            check("headless screen capture has no target",
+                  DesktopScreenReader.displayIndex(frames: [], window: nil, mainIndex: 0) == nil)
+            let boundedImage = DesktopScreenReader.imageSize(width: 7680, height: 4320)
+            check("large displays keep their aspect ratio within the image budget",
+                  boundedImage.width == 2560 && boundedImage.height == 1440)
 
             let planBody: [String: Any] = [
                 "output": [[
@@ -325,6 +404,9 @@ enum SelfTest {
                   reloadedSkills.count == 1 && reloadedSkills[0].triggers.contains("rescue tab"))
             try? FileManager.default.removeItem(at: skillsURL)
         }
+
+        DesktopAccessibilitySelfTest.run { check($0, $1) }
+        DesktopReadingSelfTest.pure { check($0, $1) }
 
         print("Inputs")
         do {
@@ -673,6 +755,66 @@ enum SelfTest {
             check("user edits are kept", buffer.committedText == "typed by hand")
         }
 
+        print("Voice Control history")
+        do {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voice-history-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let history = DesktopVoiceHistoryStore(directory: directory)
+            let first = UUID()
+            history.record(.user, text: "Bring my browser back", detail: "voice", target: "Brave", turnID: first)
+            history.record(.plan, text: "Open Brave", turnID: first)
+            history.record(.failure, text: "Brave couldn't launch", turnID: first)
+            let second = UUID()
+            history.record(.user, text: "What happened to it?", detail: "typed", turnID: second)
+            let queued = UUID()
+            history.record(.user, text: "A later queued instruction", turnID: queued)
+            let context = history.contextLines(excluding: second).joined(separator: "\n")
+            check("a follow-up receives the earlier request and its actual failure",
+                  context.contains("Bring my browser back") && context.contains("Brave couldn't launch"))
+            check("context excludes the current request and later queued utterances",
+                  !context.contains("What happened to it?") && !context.contains("later queued"))
+            let reloaded = DesktopVoiceHistoryStore(directory: directory)
+            check("Voice Control transcripts and results survive a restart",
+                  reloaded.entries.count == 5 && reloaded.entries.first?.turnID == first)
+            check("search returns the whole matching exchange including its failure",
+                  reloaded.search("browser").map(\.kind) == [.user, .plan, .failure])
+            check("the quick history menu contains only user transcripts, newest first",
+                  reloaded.recentTranscripts.map(\.text) == ["A later queued instruction", "What happened to it?", "Bring my browser back"])
+            check("the readable export distinguishes proposed plans from actual failures",
+                  (try? String(contentsOf: history.recentURL, encoding: .utf8))?.contains("failure: Brave couldn't launch") == true)
+            for url in [history.archiveURL, history.recentURL] {
+                let mode = (try? FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]) as? NSNumber
+                check("saved transcripts are readable only by their owner: \(url.lastPathComponent)", mode?.intValue == 0o600)
+            }
+            history.record(.contextReset, text: "Fresh conversation", turnID: UUID())
+            check("clearing active context keeps the saved conversation searchable",
+                  history.contextLines().isEmpty && history.search("browser").count == 3)
+            let file = try? FileHandle(forWritingTo: history.archiveURL)
+            _ = try? file?.seekToEnd()
+            try? file?.write(contentsOf: Data("{incomplete".utf8))
+            try? file?.close()
+            let recovered = DesktopVoiceHistoryStore(directory: directory)
+            recovered.record(.user, text: "After recovery", turnID: UUID())
+            let final = DesktopVoiceHistoryStore(directory: directory)
+            check("a partial trailing log record doesn't lose earlier or subsequent transcripts",
+                  final.entries.count == 7 && final.entries.last?.text == "After recovery")
+            check("assistant history context stays within its text budget",
+                  final.contextLines(maxCharacters: 20).joined(separator: "\n").count <= 20)
+            let blocked = DesktopVoiceHistoryStore(directory: history.archiveURL)
+            blocked.record(.user, text: "Still visible", turnID: UUID())
+            check("a persistence failure remains visible without discarding the current transcript",
+                  blocked.saveError != nil && blocked.entries.last?.text == "Still visible")
+            let historyCall: [String: Any] = ["output": [["type": "function_call", "name": "search_voice_history",
+                "arguments": "{\"query\":\"browser\"}"]]]
+            check("the model can retrieve earlier conversation without an exact voice trigger",
+                  (try? DesktopVoiceAssistant.interpret(historyCall, resolveApplication: { _ in nil })) == .searchHistory("browser"))
+            let historyRequest = DesktopVoiceAssistant.requestBody(utterance: "What did I ask earlier?",
+                context: .init(targetName: nil, recentActivity: []), screen: nil, learnedSkills: [], historyMatches: "Previous user: open browser")
+            check("retrieved history is available without allowing an unbounded search loop",
+                  (historyRequest["input"] as? String)?.contains("Previous user: open browser") == true
+                    && !(historyRequest["tools"] as? [[String: Any]] ?? []).contains { $0["name"] as? String == "search_voice_history" })
+        }
+
         print("InsertionHistory")
         failures += HistoryInteractionSelfTest.run()
         do {
@@ -737,6 +879,7 @@ enum SelfTest {
             check("empty line yields no chunks", TextInjector.chunked("").isEmpty)
         }
 
+        DesktopVoiceFlowSelfTest.pure { name, passed in check(name, passed) }
         print(failures == 0 ? "\nAll self-tests passed." : "\n\(failures) self-test(s) failed.")
         return failures == 0 ? 0 : 1
     }
