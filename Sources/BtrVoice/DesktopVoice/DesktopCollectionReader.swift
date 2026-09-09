@@ -67,12 +67,22 @@ enum DesktopCollectionReader {
                         backend: Backend, trace: DesktopVoiceTrace? = nil, turnID: UUID? = nil) async throws -> DesktopReadingCollection {
         let started = Date()
         let purpose: DesktopAccessibilityReader.Purpose = request.kind == .browserTabs ? .tabs : .content
-        let inventory = try await backend.read(purpose, nil)
-        let found = candidates(inventory, kind: request.kind)
+        var inventory = try await backend.read(purpose, nil)
+        var found = candidates(inventory, kind: request.kind)
+        // Some apps expose their window before populating its lazy AX children.
+        // One local, read-only retry avoids reporting an empty first frame as the
+        // available inventory. A healthy populated tree incurs no added delay.
+        if found.isEmpty {
+            trace?.record("collection.inventory_retry", turnID: turnID, fields: ["initial_elements": inventory.elementCount])
+            try await Task.sleep(nanoseconds: 100_000_000)
+            inventory = try await backend.read(purpose, nil)
+            found = candidates(inventory, kind: request.kind)
+        }
         var result = DesktopReadingCollection(kind: request.kind, application: application, items: [],
             discovered: found.count, partial: inventory.truncated || found.count > request.limit || found.isEmpty || request.kind == .unreadMessages, limitations: [])
         result.items = found.prefix(request.limit).map(\.item)
         result.limitations.append("Scope: the app's exposed tab strip/chat list, not an account-wide unread count. Hidden, virtualized or unsupported items may be missing.")
+        if request.includeContent { result.limitations.append("Content is a bounded visible excerpt, not a complete page or message archive.") }
         if found.count > request.limit { result.limitations.append("Included the first \(request.limit) of \(found.count) discovered items.") }
         if inventory.truncated { result.limitations.append("Accessibility returned a partial inventory; discovered counts are not totals.") }
         if found.isEmpty { result.limitations.append("No clearly identified \(request.kind.rawValue) were exposed. This does not prove there are none.") }

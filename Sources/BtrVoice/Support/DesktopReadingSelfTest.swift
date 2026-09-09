@@ -69,6 +69,15 @@ enum DesktopReadingSelfTest {
         var failures = 0
         func check(_ name: String, _ passed: Bool) { print("\(passed ? "PASS" : "FAIL"): \(name)"); if !passed { failures += 1 } }
         pure(check: check)
+        do {
+            var reads = 0
+            let backend = DesktopCollectionReader.Backend(read: { _, _ in
+                reads += 1
+                return reads == 1 ? .empty : tabContext(selected: 2, page: "Loaded page")
+            }, select: { _, _ in check("warming a lazy inventory never clicks", false) }, isTargetActive: { true })
+            let result = try await DesktopCollectionReader.collect(.init(kind: .browserTabs, includeContent: false), application: "Lazy fixture", backend: backend)
+            check("a lazy empty AX tree is retried once without a model", reads == 2 && result.items.count == 2)
+        } catch { check("lazy inventory recovery: \(error.localizedDescription)", false) }
         for mode in ["success", "stale-content", "focus", "uncertain", "preview"] {
             var selected = 2
             var selections = 0

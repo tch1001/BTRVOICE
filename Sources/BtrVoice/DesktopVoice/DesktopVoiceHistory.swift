@@ -54,6 +54,7 @@ final class DesktopVoiceHistoryStore: ObservableObject {
                                                      attributes: [.posixPermissions: 0o700])
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
             try writeRecentExport()
+            trace.record("session.started", turnID: nil, fields: ["diagnostics_version": 1])
         } catch { saveError = "Couldn't prepare Voice Control history: \(error.localizedDescription)" }
     }
 

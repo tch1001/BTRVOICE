@@ -65,7 +65,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
         learnedSkills: { DesktopVoiceSkillStore.shared.skills }, trace: history.trace
     )
     private var engine: TranscriptionEngine?
-    private struct QueuedCommand { let text: String; let turnID: UUID }
+    private struct QueuedCommand { let text: String; let turnID: UUID; var receivedAt = Date() }
     private var queuedCommands: [QueuedCommand] = []
     private var activeHistoryTurnID: UUID?
     private var turnStartedAt: Date?
@@ -300,7 +300,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
         let command = queued.text
         activeHistoryTurnID = queued.turnID
         append(.heard, command, detail: nil)
-        turnStartedAt = Date()
+        turnStartedAt = queued.receivedAt
 
         if let collection = DesktopCollectionRequest.infer(command, targetName: targetName) {
             runSlowPath(command, fastPathReason: "Local collection harness", collection: collection)

@@ -48,6 +48,8 @@ counts are not chat counts. Topic categories are textual, not mutations of tab g
   Switching foreground apps pauses actions rather than retargeting them.
 - Screenshots are lazy and discarded if focus changes during capture. Structured
   read-only questions do not gain action permissions from page text.
+- An initially empty lazy AX inventory gets one local read-only retry after 100 ms.
+  Populated inventories do not pay this delay.
 - No model upgrade or extra speech service is required. There is no sub-second
   guarantee for cloud summaries or multi-page collection: measure the phases below.
 
@@ -70,9 +72,9 @@ Schema version 1 records `event`, Unix `at`, `session_id`, `turn_id`, `span_id`,
 extensible `fields`. Start with `conversation.failure`, then follow the turn's
 `model.request`/`model.response` (HTTP status, request ID, raw JSON, usage, duration),
 `tool.rejected`, `ui.snapshot`/`ax.read`, `ui.action_*`, `ui.stale_recovery`, and
-`collection.*`. `turn.finished.duration_ms` measures execution-start-to-completion;
-subtract `turn.received.at` from `turn.finished.at` to include queue wait. Neither
-includes speech recognition/endpointing time. Model spans isolate network/model latency; AX spans
+`collection.*`. `turn.finished.duration_ms` measures queue-entry-to-completion;
+`turn.received.at` and `turn.finished.at` also expose the boundaries. Neither includes
+speech recognition/endpointing time. Model spans isolate network/model latency; AX spans
 isolate desktop latency. A snapshot is bounded raw semantic text, not a full AX dump.
 
 The asynchronous diagnostic writer keeps disk work off the interaction thread.

@@ -78,6 +78,10 @@ enum DesktopAccessibilityIntegrationTest {
                     .init(kind: .browserTabs, limit: 5, includeContent: false), application: "Native fixture",
                     backend: DesktopCollectionReader.liveBackend(application: application, token: DesktopVoiceCancellation(), trace: nil, turnID: nil))
                 check("native tab collection reads exposed titles without a model", Set(collection.items.map(\.title)) == ["Research", "Shopping"])
+                if Set(collection.items.map(\.title)) != ["Research", "Shopping"] {
+                    let tabs = await Task.detached { DesktopAccessibilityReader.read(processIdentifier: pid, purpose: .tabs) }.value
+                    print("Fixture tabs: \(collection.json)\n\(tabs.text)")
+                }
             }
             let unread = try find(context, label: "Unread", role: "AXCheckBox")
             try await execute(context, element: unread, action: "AXPress")
