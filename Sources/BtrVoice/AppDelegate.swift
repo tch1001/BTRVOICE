@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.releaseFocus = { [weak self] in
             self?.panels.releaseFocus()
+            InsertionHistoryWindowController.shared.releaseFocus()
         }
         VirtualKeyboardController.shared.configureKeyHandler { [weak self] code, flags in
             self?.controller.pressVirtualKeyboardKey(code, flags: flags)

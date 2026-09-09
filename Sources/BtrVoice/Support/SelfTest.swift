@@ -674,6 +674,7 @@ enum SelfTest {
         }
 
         print("InsertionHistory")
+        failures += HistoryInteractionSelfTest.run()
         do {
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("btrvoice-history-\(UUID().uuidString).json")

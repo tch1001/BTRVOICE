@@ -21,6 +21,9 @@ final class DictationController: ObservableObject {
     @Published private(set) var status: String = ""
     @Published private(set) var errorMessage: String?
     @Published private(set) var usingOnDeviceRecognition = false
+    /// Text delivery is separate from microphone state: a history retry must not
+    /// turn a live dictation session into an idle one when its keystrokes finish.
+    @Published private(set) var isInjectingText = false
 
     let buffer = TextBuffer()
     let targets = TargetTracker()
@@ -48,6 +51,14 @@ final class DictationController: ObservableObject {
 
     var isListening: Bool { phase == .listening }
     var isCommitPending: Bool { pendingCommit != nil }
+    var canReinsertHistory: Bool {
+        Self.historyRetryIsAvailable(phase: phase, insertingText: isInjectingText,
+                                     awaitingCommand: pendingCommit != nil || pendingCommand != nil)
+    }
+
+    static func historyRetryIsAvailable(phase: Phase, insertingText: Bool, awaitingCommand: Bool) -> Bool {
+        (phase == .idle || phase == .listening) && !insertingText && !awaitingCommand
+    }
 
     // MARK: - Public control
 
@@ -126,6 +137,10 @@ final class DictationController: ObservableObject {
 
     /// Sends the buffer to the focused app as keystrokes.
     func commit(send: Bool = false) {
+        guard !isInjectingText else {
+            status = "Wait for the current insertion to finish"
+            return
+        }
         // Inserting shouldn't end the conversation: if they were talking, pick the
         // microphone back up as soon as the text is delivered.
         if phase == .listening { resumeAfterCommit = true }
@@ -144,14 +159,15 @@ final class DictationController: ObservableObject {
     /// or creating duplicate history entries. The user can choose whether this
     /// attempt should also press Return, regardless of the original action.
     func reinsertHistory(_ entry: InsertionHistoryEntry, send: Bool) {
-        guard phase == .idle else {
+        guard canReinsertHistory else {
             status = "Finish the current action before retrying history"
             return
         }
         let text = entry.text.trimmingCharacters(in: .newlines)
         guard !text.isEmpty else { return }
         guard Permissions.accessibilityGranted else {
-            fail("Accessibility access is required to type into other apps.")
+            errorMessage = "Accessibility access is required to type into other apps."
+            showPanel?()
             Permissions.requestAccessibility()
             Permissions.openSettings(.accessibility)
             return
@@ -159,7 +175,7 @@ final class DictationController: ObservableObject {
 
         let targetName = targets.targetName ?? "the focused app"
         Log.write("history retry: \(text.count) chars → \(targetName), send=\(send)")
-        inject(text, send: send, targetName: targetName) { [weak self] in
+        inject(text, send: send, targetName: targetName, preservingDictation: true) { [weak self] in
             self?.status = "Reinserted into \(targetName)"
         }
     }
@@ -887,7 +903,7 @@ final class DictationController: ObservableObject {
 
     private func performCommit(send: Bool) {
         // Two commits in flight would interleave keystrokes in the target app.
-        guard phase != .committing else { return }
+        guard phase != .committing, !isInjectingText else { return }
 
         // Only confirmed (white) text is typed. The grey in-flight tail is still
         // being recognised — inserting it would commit words the user hasn't seen
@@ -949,19 +965,27 @@ final class DictationController: ObservableObject {
         _ text: String,
         send: Bool,
         targetName: String,
+        preservingDictation: Bool = false,
         onSuccess: @escaping () -> Void
     ) {
-        phase = .committing
+        guard !isInjectingText else { return }
+        isInjectingText = true
+        if !preservingDictation { phase = .committing }
         status = "Inserting into \(targetName)…"
 
         // Order matters: stop being the key window, then make sure the destination
         // really has focus, and only then post events.
         releaseFocus?()
-        if settings.hideAfterCommit { hidePanel?() }
+        if !preservingDictation, settings.hideAfterCommit { hidePanel?() }
 
         targets.focusTarget { [weak self] ok in
             guard let self else { return }
             if !ok {
+                if preservingDictation {
+                    self.isInjectingText = false
+                    self.status = "Focus the destination field, then retry history"
+                    return
+                }
                 self.status = "Could not focus \(targetName) — typing anyway"
             }
             TextInjector.inject(
@@ -970,14 +994,24 @@ final class DictationController: ObservableObject {
                 newlineMode: self.settings.newlineMode,
                 pressReturnAfter: send
             ) { result in
+                self.isInjectingText = false
                 switch result {
                 case .success:
                     self.status = "Inserted into \(targetName)"
-                    self.phase = .idle
+                    if !preservingDictation { self.phase = .idle }
                     onSuccess()
                 case .failure(let error):
-                    self.resumeAfterCommit = false
-                    self.fail(error.localizedDescription)
+                    if preservingDictation {
+                        // A failed retry must not stop recognition or discard the
+                        // live draft. The saved entry remains available to retry.
+                        self.errorMessage = error.localizedDescription
+                        self.status = "Could not reinsert history"
+                        self.showPanel?()
+                        Log.write("history retry failed: \(error.localizedDescription)")
+                    } else {
+                        self.resumeAfterCommit = false
+                        self.fail(error.localizedDescription)
+                    }
                 }
             }
         }

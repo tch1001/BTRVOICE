@@ -51,7 +51,7 @@ private struct InsertionHistoryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Clear History…", role: .destructive) {
+                HistoryActionButton(title: "Clear History…", destructive: true) {
                     confirmingClear = true
                 }
                 .disabled(store.entries.isEmpty)
@@ -83,7 +83,7 @@ private struct InsertionHistoryView: View {
 
     private var targetDescription: String {
         if let name = targets.targetName {
-            return "Retry actions type into \(name). To change it, focus another app, then return here."
+            return "Retry actions type into \(name). Click the destination field, then click Insert here—no need to focus this window."
         }
         return "Focus the destination app before retrying an insertion."
     }
@@ -114,45 +114,77 @@ private struct InsertionHistoryView: View {
 
             HStack {
                 Spacer()
-                Button("Insert", systemImage: "text.insert") {
+                HistoryActionButton(title: "Insert", symbol: "text.insert") {
                     controller.reinsertHistory(entry, send: false)
                 }
-                Button("Insert & Send", systemImage: "paperplane") {
+                HistoryActionButton(title: "Insert & Send", symbol: "paperplane", prominent: true) {
                     controller.reinsertHistory(entry, send: true)
                 }
-                .buttonStyle(.borderedProminent)
             }
             .controlSize(.small)
-            .disabled(controller.phase != .idle)
+            .disabled(!controller.canReinsertHistory)
+            .help(controller.canReinsertHistory
+                  ? "Insert this saved text into the destination app without changing your current dictation."
+                  : "Wait for the current insertion, finalization, or command to finish.")
         }
         .padding(.vertical, 7)
     }
 }
 
-/// Owns the ordinary, activating history window. Activating BtrVoice does not
-/// overwrite TargetTracker, so retry can still restore the last external app.
+/// A non-activating utility panel keeps the destination app's insertion caret live
+/// while history remains visible above it, matching the dictation overlay.
+final class InsertionHistoryPanel: NSPanel {
+    init(contentViewController: NSViewController) {
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        self.contentViewController = contentViewController
+        isFloatingPanel = true
+        level = .floating
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = true
+        isReleasedWhenClosed = false
+        animationBehavior = .utilityWindow
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// Owns the floating history panel without changing the current target app.
 final class InsertionHistoryWindowController {
     static let shared = InsertionHistoryWindowController()
 
-    private var window: NSWindow?
+    private var window: InsertionHistoryPanel?
 
     private init() {}
+
+    func releaseFocus() {
+        window?.makeFirstResponder(nil)
+        if window?.isKeyWindow == true { window?.resignKey() }
+    }
 
     func show(controller: DictationController) {
         if window == nil {
             let root = InsertionHistoryView(store: .shared, controller: controller)
             let hosting = NSHostingController(rootView: root)
-            let created = NSWindow(contentViewController: hosting)
+            let created = InsertionHistoryPanel(contentViewController: hosting)
             created.title = "BtrVoice Insertion History"
-            created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             created.setContentSize(NSSize(width: 760, height: 600))
             created.minSize = NSSize(width: 680, height: 500)
-            created.isReleasedWhenClosed = false
             created.center()
             window = created
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 }
