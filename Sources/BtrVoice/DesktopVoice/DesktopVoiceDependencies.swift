@@ -12,6 +12,9 @@ struct DesktopVoiceDependencies {
     var openURL: @MainActor (URL) async throws -> Void
     var insertText: @MainActor (String, Bool, DesktopVoiceCancellation) async throws -> Void
     var collect: (@MainActor (DesktopCollectionRequest) async throws -> DesktopReadingCollection)?
+    var makeTranscriber: (() -> TranscriptionEngine)?
+    var startAudio: (() throws -> Void)?
+    var stopAudio: (() -> Void)?
 }
 
 struct DesktopVoicePreparedText {

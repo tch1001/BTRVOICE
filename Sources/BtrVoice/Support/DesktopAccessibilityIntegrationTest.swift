@@ -87,6 +87,37 @@ enum DesktopAccessibilityIntegrationTest {
             try await execute(context, element: unread, action: "AXPress")
             context = await read()
             check("pressing an exposed control updates the other process", context.text.contains("Unread selected"))
+            var staticFolder = try find(context, label: "Static folder", role: "AXStaticText")
+            check("the custom static-text fixture has no AXPress", !staticFolder.actions.contains("AXPress"))
+            staticFolder.clickFrame = DesktopAccessibilityReader.frame(staticFolder.reference)
+            let staticTarget = staticFolder
+            let clickContext = context
+            try await Task.detached { try DesktopAccessibilityClick.execute(staticTarget, in: clickContext) }.value
+            try await Task.sleep(nanoseconds: 100_000_000)
+            context = await read()
+            check("the verified synthetic click reaches a static-text control without AXPress", context.text.contains("Static folder selected"))
+            var moved = staticTarget
+            moved.clickFrame = moved.clickFrame?.offsetBy(dx: 10, dy: 0)
+            let movedTarget = moved
+            do {
+                try await Task.detached { try DesktopAccessibilityClick.execute(movedTarget, in: clickContext) }.value
+                check("moved geometry rejects a synthetic click", false)
+            } catch { check("moved geometry rejects a synthetic click", true) }
+            if let frame = staticTarget.clickFrame, let screen = NSScreen.screens.first {
+                let cover = NSPanel(contentRect: NSRect(x: frame.minX, y: screen.frame.maxY - frame.maxY,
+                    width: frame.width, height: frame.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+                cover.level = .floating
+                cover.contentView?.setAccessibilityElement(true)
+                cover.contentView?.setAccessibilityRole(.group)
+                cover.contentView?.setAccessibilityLabel("Regression fixture cover")
+                cover.orderFrontRegardless()
+                try await Task.sleep(nanoseconds: 100_000_000)
+                do {
+                    try await Task.detached { try DesktopAccessibilityClick.execute(staticTarget, in: clickContext) }.value
+                    check("an overlapping window blocks the synthetic click", false)
+                } catch { check("an overlapping window blocks the synthetic click", true) }
+                cover.orderOut(nil)
+            }
             let slider = try find(context, label: "Test volume", role: "AXSlider")
             try await execute(context, element: slider, attribute: "AXValue", json: "75")
             context = await read()
@@ -210,6 +241,10 @@ private final class AccessibilityFixture: NSObject {
         slider.setAccessibilityLabel("Test volume")
         let field = NSTextField(string: "hello world")
         field.setAccessibilityLabel("Test search")
+        let staticFolder = StaticFolderFixture()
+        staticFolder.onClick = { [weak self] in self?.state.stringValue = "Static folder selected" }
+        staticFolder.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        staticFolder.heightAnchor.constraint(equalToConstant: 24).isActive = true
         let tabs = NSTabView()
         for title in ["Research", "Shopping"] {
             let item = NSTabViewItem(identifier: title)
@@ -219,7 +254,7 @@ private final class AccessibilityFixture: NSObject {
         }
         tabs.heightAnchor.constraint(equalToConstant: 85).isActive = true
         tabs.widthAnchor.constraint(equalToConstant: 350).isActive = true
-        let stack = NSStackView(views: [unread, disabled, slider, field, state, tabs])
+        let stack = NSStackView(views: [unread, disabled, slider, field, state, staticFolder, tabs])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
         window.contentView!.addSubview(stack)
@@ -247,4 +282,18 @@ private final class AccessibilityFixture: NSObject {
 
     @objc private func pressUnread() { state.stringValue = "Unread selected" }
     @objc private func showDetails() { state.stringValue = "Details selected" }
+}
+
+/// Deliberately reports text semantics while handling normal mouse clicks, like
+/// Qt folder labels. It exposes no Accessibility action.
+private final class StaticFolderFixture: NSView {
+    var onClick: (() -> Void)?
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
+    override func accessibilityLabel() -> String? { "Static folder" }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.controlBackgroundColor.setFill(); dirtyRect.fill()
+        ("Static folder" as NSString).draw(at: NSPoint(x: 3, y: 3), withAttributes: [.foregroundColor: NSColor.labelColor])
+    }
 }

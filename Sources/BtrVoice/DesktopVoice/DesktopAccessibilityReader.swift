@@ -1,7 +1,7 @@
 /// Reads the active window's semantic text and controls without changing focus or UI.
 /// Work is bounded because another application's accessibility server can stop replying.
 import ApplicationServices
-import Foundation
+import AppKit
 
 struct DesktopAccessibilityContext {
     let text: String
@@ -10,6 +10,7 @@ struct DesktopAccessibilityContext {
     var snapshotID = UUID().uuidString
     var capturedAt = Date()
     var processIdentifier: pid_t?
+    var bundleIdentifier: String?
     var window: AXUIElement?
     var elements: [String: DesktopAccessibilityElement] = [:]
 
@@ -30,6 +31,7 @@ struct DesktopAccessibilityElement {
     var characterCount: Int?
     var value: String?
     var selected: Bool?
+    var clickFrame: CGRect?
 }
 
 enum DesktopUIScope: String { case window, menus, windows }
@@ -51,6 +53,7 @@ enum DesktopAccessibilityReader {
         guard AXIsProcessTrusted() else { return .empty }
         let deadline = Date().addingTimeInterval(2)
         let app = AXUIElementCreateApplication(processIdentifier)
+        let bundleIdentifier = NSRunningApplication(processIdentifier: processIdentifier)?.bundleIdentifier
         AXUIElementSetMessagingTimeout(app, 0.15)
         // Menus and freshly launched apps can temporarily omit focused/main
         // window even though their visible window still exists.
@@ -111,7 +114,17 @@ enum DesktopAccessibilityReader {
                 "AXSelectedText", "AXSelectedTextRange", "AXURL", "AXDocument"] : ["AXValue", "AXSelected", "AXURL", "AXDocument"]
             let state = attributes(stateNamesToRead, element)
             let value = text(state["AXValue"])
-            let actions = purpose == .controls || ["AXRow", "AXCell", "AXTab", "AXRadioButton", "AXButton", "AXWindow"].contains(role) ? actions(element) : []
+            let isTelegramItem = DesktopTelegramSemantics.isListItem(bundleIdentifier: bundleIdentifier,
+                role: role, parentRole: parentID.flatMap { elements[$0]?.role },
+                parentLabel: parentID.flatMap { elements[$0]?.label })
+            var actions = purpose == .controls || isTelegramItem
+                || ["AXRow", "AXCell", "AXTab", "AXRadioButton", "AXButton", "AXWindow"].contains(role) ? actions(element) : []
+            let clickFrame = purpose == .controls && isTelegramItem
+                && parentID.flatMap({ elements[$0]?.label }) == "Folders"
+                && !actions.contains("AXPress") ? frame(element) : nil
+            if let clickFrame, DesktopAccessibilityClick.isUsable(clickFrame) {
+                actions.append(DesktopAccessibilityClick.action)
+            }
             let names = purpose == .controls ? attributeNames(element) : []
             let writable = DesktopAccessibilityControl.writableKinds(role: role).filter {
                 names.contains($0.key) && isSettable($0.key, element)
@@ -121,6 +134,7 @@ enum DesktopAccessibilityReader {
             var entry = DesktopAccessibilityElement(id: id, reference: element, parentID: parentID,
                 role: role, label: label, actions: actions, writable: writable, enabled: enabled)
             entry.value = value.map { String($0.prefix(5_000)) }
+            entry.clickFrame = clickFrame
             entry.selected = (state["AXSelected"] as? Bool)
                 ?? (role == "AXRadioButton" ? state["AXValue"] as? Bool : nil)
             if DesktopAccessibilityControl.writableKinds(role: role)["AXValue"] == .number {
@@ -149,7 +163,10 @@ enum DesktopAccessibilityReader {
             for name in stateNames {
                 if let value = text(state[name]) { line += " | \(name)=\(String(value.prefix(1800)))" }
             }
-            if let selectedRange = state["AXSelectedTextRange"], CFGetTypeID(selectedRange as CFTypeRef) == AXValueGetTypeID() {
+            if ["AXTextField", "AXTextArea", "AXComboBox"].contains(role),
+               let selectedRange = state["AXSelectedTextRange"],
+               CFGetTypeID(selectedRange as CFTypeRef) == AXValueGetTypeID(),
+               AXValueGetType(selectedRange as! AXValue) == .cfRange {
                 var range = CFRange()
                 if AXValueGetValue(selectedRange as! AXValue, .cfRange, &range) {
                     line += " | selection: location=\(range.location) length=\(range.length)"
@@ -203,6 +220,7 @@ enum DesktopAccessibilityReader {
         if truncated { text += "\n[Partial view: inspect a specific container to read more. Child offsets are zero-based.]" }
         var context = DesktopAccessibilityContext(text: text, elementCount: lines.count, truncated: truncated)
         context.processIdentifier = processIdentifier
+        context.bundleIdentifier = bundleIdentifier
         context.window = scope == .windows ? nil : window
         context.elements = elements
         return context
@@ -221,7 +239,19 @@ enum DesktopAccessibilityReader {
             // A few older/custom apps implement only individual attribute reads.
             return names.reduce(into: [:]) { result, name in result[name] = attribute(name, element) }
         }
-        return Dictionary(uniqueKeysWithValues: zip(names, values))
+        return validAttributes(names, values: values)
+    }
+
+    // A successful batch can still contain CFNull or per-attribute AX errors.
+    // These are missing values, never text, booleans or selected-text ranges.
+    static func validAttributes(_ names: [String], values: [Any]) -> [String: Any] {
+        Dictionary(uniqueKeysWithValues: zip(names, values).filter { _, value in
+            if value is NSNull { return false }
+            if CFGetTypeID(value as CFTypeRef) == AXValueGetTypeID() {
+                return AXValueGetType(value as! AXValue) != .axError
+            }
+            return true
+        })
     }
 
     static func elementAttribute(_ name: String, _ element: AXUIElement) -> AXUIElement? {
@@ -246,7 +276,8 @@ enum DesktopAccessibilityReader {
     static func actions(_ element: AXUIElement) -> [String] {
         var raw: CFArray?
         AXUIElementCopyActionNames(element, &raw)
-        return raw as? [String] ?? []
+        var seen = Set<String>()
+        return (raw as? [String] ?? []).filter { seen.insert($0).inserted }
     }
 
     static func attributeNames(_ element: AXUIElement) -> [String] {
@@ -276,9 +307,11 @@ enum DesktopAccessibilityReader {
         return trimmed?.isEmpty == false ? trimmed : nil
     }
 
-    private static func frame(_ element: AXUIElement) -> CGRect? {
+    static func frame(_ element: AXUIElement) -> CGRect? {
         guard let position = attribute("AXPosition", element), let size = attribute("AXSize", element),
-              CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+              CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID(),
+              AXValueGetType(position as! AXValue) == .cgPoint,
+              AXValueGetType(size as! AXValue) == .cgSize else { return nil }
         var point = CGPoint.zero
         var dimensions = CGSize.zero
         guard AXValueGetValue(position as! AXValue, .cgPoint, &point),

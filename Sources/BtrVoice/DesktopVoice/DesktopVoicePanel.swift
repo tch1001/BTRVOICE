@@ -4,12 +4,22 @@ import SwiftUI
 /// A compact, resizable, non-activating overlay for live desktop commands. It
 /// mirrors dictation's screen-level presence while keeping focus in the app the
 /// user intends to control.
-private struct DesktopVoicePanelView: View {
+struct DesktopVoicePanelView: View {
     private static let activityBottomID = "desktop-voice-activity-bottom"
 
     @ObservedObject var coordinator: DesktopVoiceCoordinator
-    @ObservedObject private var history = DesktopVoiceHistoryStore.shared
+    @ObservedObject private var history: DesktopVoiceHistoryStore
     @State private var manualCommand = ""
+
+    init(coordinator: DesktopVoiceCoordinator) {
+        self.coordinator = coordinator
+        self.history = coordinator.history
+    }
+
+    private struct ScrollRevision: Equatable {
+        let lastID: UUID?
+        let partial: String
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -142,7 +152,10 @@ private struct DesktopVoicePanelView: View {
     private var activity: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                // The live list is capped at forty rows. Eager layout avoids the
+                // lazy-stack height/scroll-anchor feedback loop when Stop removes
+                // a partial below variable-height Markdown answers.
+                VStack(alignment: .leading, spacing: 10) {
                     if let error = history.saveError {
                         Text(error).font(.caption).foregroundStyle(.orange)
                     }
@@ -191,16 +204,14 @@ private struct DesktopVoicePanelView: View {
                 }
                 .padding(12)
             }
-            .onAppear {
-                proxy.scrollTo(Self.activityBottomID, anchor: .bottom)
-            }
-            .onChange(of: coordinator.activities.last?.id) {
-                withAnimation(.easeOut(duration: 0.16)) {
+            .task(id: ScrollRevision(lastID: coordinator.activities.last?.id, partial: coordinator.partialTranscript)) {
+                // Coalesce updates after body evaluation. Never animate or issue
+                // a scroll while SwiftUI is measuring changing row heights.
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                withTransaction(Transaction(animation: nil)) {
                     proxy.scrollTo(Self.activityBottomID, anchor: .bottom)
                 }
-            }
-            .onChange(of: coordinator.partialTranscript) {
-                proxy.scrollTo(Self.activityBottomID, anchor: .bottom)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

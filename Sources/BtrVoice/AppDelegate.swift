@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panels: PanelController!
     private var statusItem: StatusItemController!
     private var cancellables: Set<AnyCancellable> = []
+    private var uiWatchdog: MainThreadWatchdog?
 
     /// Press-and-hold tracking for ⌥Space, so a tap latches and a hold is momentary.
     /// How long counts as a hold lives on the controller, which is the only thing
@@ -18,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.startSession()
         DesktopVoiceHistoryStore.shared.prepareExport()
+        uiWatchdog = MainThreadWatchdog(trace: DesktopVoiceHistoryStore.shared.trace)
+        uiWatchdog?.start()
         PermissionMonitor.shared.start()
         Log.write("permissions: \(PermissionMonitor.shared.summary)")
 
@@ -96,12 +99,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        DesktopVoiceHistoryStore.shared.trace.record("app.termination_requested", turnID: nil)
         panels?.persistFrameNow()
         HotkeyManager.shared.unregister()
         VirtualKeyboardController.shared.shutdown()
         DesktopVoiceCoordinator.shared.shutdown()
-        DesktopVoiceHistoryStore.shared.trace.flush()
         JarvisVoiceService.shared.shutdown()
+        DesktopVoiceHistoryStore.shared.trace.record("app.termination_ready", turnID: nil)
+        DesktopVoiceHistoryStore.shared.trace.flush()
     }
 
     // MARK: - Hotkeys

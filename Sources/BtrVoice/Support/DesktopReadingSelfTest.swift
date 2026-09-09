@@ -38,6 +38,24 @@ enum DesktopReadingSelfTest {
         check("explicit DMs precede group chats", candidates.first?.item.category == "direct_message")
         check("a person's name does not prove a DM", candidates.last?.item.category == "unknown_chat_type")
         check("unread filters and nested badges do not inflate chat counts", candidates.count == 3)
+        var telegram = context([
+            element(1, role: "AXList", label: "Folders"),
+            element(2, parent: "e1", role: "AXStaticText", label: "Unread (125 unread chats)"),
+            element(3, role: "AXList", label: "Chats"),
+            element(4, parent: "e3", role: "AXStaticText", label: "Channel, Updates, Muted, 3 new messages, Release tomorrow"),
+            element(5, parent: "e3", role: "AXStaticText", label: "Alex, 1 new message, Please review my group project"),
+            element(6, parent: "e3", role: "AXStaticText", label: "Sam, Not seen, My outgoing message"),
+            element(7, parent: "e3", role: "AXStaticText", label: "Taylor, Seen, zero new messages")])
+        telegram.bundleIdentifier = "com.tdesktop.Telegram"
+        let telegramItems = DesktopCollectionReader.candidates(telegram, kind: .unreadMessages).map(\.item)
+        check("Telegram static-text chat rows expose unread list previews", telegramItems.map(\.title) == ["Updates", "Alex"])
+        check("Telegram folder counts and outgoing Not seen receipts are not incoming unread chats", telegramItems.count == 2)
+        check("a word in a message preview does not classify its chat as a group", telegramItems.last?.category == "unknown_chat_type")
+        check("explicit spoken Unread selection identifies the folder instead of a chat", DesktopTelegramSemantics.requestedFolder("Go to the unread tab.", in: telegram)?.id == "e2")
+        check("folder questions and multi-step tasks do not become a single selection", DesktopTelegramSemantics.requestedFolder("What is in the Unread folder?", in: telegram) == nil
+            && DesktopTelegramSemantics.requestedFolder("Open Unread and summarize messages", in: telegram) == nil)
+        telegram.bundleIdentifier = "example.unrelated"
+        check("Telegram list conventions do not reinterpret arbitrary application text", DesktopCollectionReader.candidates(telegram, kind: .unreadMessages).isEmpty)
         let tabs = tabContext(selected: 2, page: "Page one text")
         check("only tab semantics identify tabs, not close buttons", DesktopCollectionReader.candidates(tabs, kind: .browserTabs).count == 2)
         check("page content excludes browser chrome", DesktopCollectionReader.content(tabs, kind: .browserTabs) == "Example page\nPage one text")

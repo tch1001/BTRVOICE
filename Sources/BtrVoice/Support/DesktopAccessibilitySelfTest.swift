@@ -6,6 +6,13 @@ import Foundation
 enum DesktopAccessibilitySelfTest {
     static func run(check: (String, Bool) -> Void) {
         print("Accessibility control")
+        var unavailable = AXError.attributeUnsupported
+        let badValue = AXValueCreate(.axError, &unavailable)!
+        let batch = DesktopAccessibilityReader.validAttributes(["AXTitle", "AXSelectedTextRange", "AXValue"],
+            values: ["Fixture", badValue, NSNull()])
+        check("per-attribute AX errors and nulls are absent values", batch.count == 1 && batch["AXTitle"] as? String == "Fixture")
+        check("nonfinite or empty AX geometry never authorizes a click", !DesktopAccessibilityClick.isUsable(.zero)
+            && !DesktopAccessibilityClick.isUsable(CGRect(x: Double.infinity, y: 0, width: 20, height: 20)))
         let ref = AXUIElementCreateApplication(42)
         let button = DesktopAccessibilityElement(id: "e1", reference: ref, parentID: nil, role: "AXButton",
             label: "Unread", actions: ["AXPress", "AXShowMenu"], writable: ["AXFocused": .boolean], enabled: true)

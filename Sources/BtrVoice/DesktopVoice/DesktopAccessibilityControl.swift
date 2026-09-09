@@ -99,7 +99,7 @@ struct DesktopUICommand: Equatable {
         let label = element.flatMap { $0.label.isEmpty ? nil : $0.label } ?? "control"
         let verb: String
         switch action ?? attribute {
-        case "AXPress": verb = "Press"
+        case "AXPress", DesktopAccessibilityClick.action: verb = "Press"
         case "AXPick", "AXSelected", "AXSelectedChildren", "AXSelectedRows": verb = "Select"
         case "AXShowMenu": verb = "Open menu for"
         case "AXRaise", "AXMain": verb = "Bring forward"
@@ -222,6 +222,17 @@ enum DesktopAccessibilityControl {
         }
         let result: AXError
         if let action = command.action {
+            if action == DesktopAccessibilityClick.action {
+                // The model cannot invent a mouse coordinate or widen this
+                // adapter to arbitrary page text. Recheck the live list identity.
+                guard DesktopTelegramSemantics.isItem(target, in: context, list: "Folders"),
+                      NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.tdesktop.Telegram",
+                      let parent = DesktopAccessibilityReader.elementAttribute("AXParent", ref),
+                      DesktopAccessibilityReader.string("AXRole", parent) == "AXList",
+                      DesktopAccessibilityReader.label(parent) == "Folders" else { throw DesktopAXError.unavailable }
+                try DesktopAccessibilityClick.execute(target, in: context)
+                return "Posted one click on the exact folder: \(target.label). Read the updated UI to verify; do not assume it opened."
+            }
             guard DesktopAccessibilityReader.actions(ref).contains(action) else { throw DesktopAXError.unavailable }
             try Task.checkCancellation()
             result = AXUIElementPerformAction(ref, action as CFString)

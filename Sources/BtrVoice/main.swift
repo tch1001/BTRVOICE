@@ -11,6 +11,18 @@ if CommandLine.arguments.contains("--self-test") {
     exit(SelfTest.run())
 }
 
+// Render the real overlay and exercise Stop with synthetic transcripts only.
+if CommandLine.arguments.contains("--self-test-voice-panel") {
+    let testApp = NSApplication.shared
+    testApp.setActivationPolicy(.accessory)
+    DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+        fputs("FAIL: Voice Control panel blocked the main run loop.\n", stderr)
+        _exit(1)
+    }
+    Task { @MainActor in exit(await DesktopVoicePanelSelfTest.run()) }
+    testApp.run()
+}
+
 if CommandLine.arguments.contains("--self-test-reading") || CommandLine.arguments.contains("--self-test-reading-model") {
     let testApp = NSApplication.shared
     testApp.setActivationPolicy(.prohibited)

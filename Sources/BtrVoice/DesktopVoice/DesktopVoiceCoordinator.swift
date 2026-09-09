@@ -65,6 +65,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
         learnedSkills: { DesktopVoiceSkillStore.shared.skills }, trace: history.trace
     )
     private var engine: TranscriptionEngine?
+    private var listeningGeneration = UUID()
     private struct QueuedCommand { let text: String; let turnID: UUID; var receivedAt = Date() }
     private var queuedCommands: [QueuedCommand] = []
     private var activeHistoryTurnID: UUID?
@@ -119,6 +120,9 @@ final class DesktopVoiceCoordinator: ObservableObject {
             status = phase == .executing ? "Running a command…" : "Listening for a command"
             return
         }
+        listeningGeneration = UUID()
+        let generation = listeningGeneration
+        if dependencies?.makeTranscriber != nil { beginListening(); return }
         guard OpenAIKeyStore.isSet else {
             phase = .failed
             status = "Set the OpenAI API key in the Jarvis menu to enable voice commands."
@@ -130,6 +134,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
         status = "Connecting to live transcription…"
         Permissions.requestMicrophone { [weak self] granted in
             guard let self else { return }
+            guard self.listeningGeneration == generation, self.phase == .connecting else { return }
             guard granted else {
                 self.fail("Microphone access is required for voice control.")
                 Permissions.openSettings(.microphone)
@@ -140,6 +145,10 @@ final class DesktopVoiceCoordinator: ObservableObject {
     }
 
     func stop() {
+        let started = Date()
+        history.trace.record("listening.stop_requested", turnID: activeHistoryTurnID,
+                             fields: ["had_engine": engine != nil, "phase": String(describing: phase)])
+        listeningGeneration = UUID()
         cancellation.cancel()
         taskMemory = nil
         preparedText = nil
@@ -148,9 +157,10 @@ final class DesktopVoiceCoordinator: ObservableObject {
         autoSubmitTimer = nil
         slowPathTask?.cancel()
         slowPathTask = nil
-        audio.stop()
-        engine?.cancel()
+        let retired = engine
         engine = nil
+        stopAudio()
+        retired?.cancel()
         queuedCommands.removeAll()
         commandIsExecuting = false
         microphoneMeter.update(0)
@@ -158,6 +168,8 @@ final class DesktopVoiceCoordinator: ObservableObject {
         phase = .idle
         status = "Voice control paused"
         Log.write("desktop-voice: stopped")
+        history.trace.record("listening.stopped", turnID: nil,
+                             fields: ["duration_ms": Date().timeIntervalSince(started) * 1_000])
     }
 
     func toggle(target: NSRunningApplication?) {
@@ -233,26 +245,28 @@ final class DesktopVoiceCoordinator: ObservableObject {
 
     private func beginListening() {
         guard engine == nil else { return }
-        let engine = OpenAITranscribeEngine(
+        let engine = dependencies?.makeTranscriber?() ?? OpenAITranscribeEngine(
             model: "gpt-live-transcribe",
             displayName: "GPT Live Transcribe"
         )
         self.engine = engine
+        let generation = listeningGeneration
 
         engine.onPartial = { [weak self] transcript in
-            self?.receivePartial(transcript)
+            guard let self, self.listeningGeneration == generation, self.engine != nil else { return }
+            self.receivePartial(transcript)
         }
         engine.onSegmentFinal = { [weak self] transcript in
-            guard let self else { return }
+            guard let self, self.listeningGeneration == generation, self.engine != nil else { return }
             self.autoSubmitTimer?.invalidate()
             self.autoSubmitTimer = nil
             self.partialTranscript = ""
             self.submit(transcript, source: "voice")
         }
         engine.onFinished = { [weak self] in
-            guard let self else { return }
+            guard let self, self.listeningGeneration == generation, self.engine != nil else { return }
             self.engine = nil
-            self.audio.stop()
+            self.stopAudio()
             self.microphoneMeter.update(0)
             if !self.commandIsExecuting {
                 self.phase = .idle
@@ -260,10 +274,12 @@ final class DesktopVoiceCoordinator: ObservableObject {
             }
         }
         engine.onError = { [weak self] error in
-            self?.fail(error.localizedDescription)
+            guard let self, self.listeningGeneration == generation, self.engine != nil else { return }
+            self.fail(error.localizedDescription)
         }
         engine.onStatus = { [weak self] message in
-            guard let self, self.phase != .thinking, self.phase != .executing else { return }
+            guard let self, self.listeningGeneration == generation, self.engine != nil,
+                  self.phase != .thinking, self.phase != .executing else { return }
             self.status = message
         }
 
@@ -274,22 +290,26 @@ final class DesktopVoiceCoordinator: ObservableObject {
             self?.microphoneMeter.update(value)
         }
         audio.onFailure = { [weak self] error in
-            self?.fail(error.localizedDescription)
+            guard let self, self.listeningGeneration == generation, self.engine != nil else { return }
+            self.fail(error.localizedDescription)
         }
 
         do {
             try engine.start()
-            try audio.start()
+            if let startAudio = dependencies?.startAudio { try startAudio() }
+            else { try audio.start() }
             phase = .listening
             status = "Listening for a command"
             append(.notice, "Voice control started", detail: "Fast commands run locally; unfamiliar commands and questions use the model-backed slow path.")
             Log.write("desktop-voice: listening with shared OpenAI key")
         } catch {
-            engine.cancel()
-            self.engine = nil
-            audio.stop()
             fail(error.localizedDescription)
         }
+    }
+
+    private func stopAudio() {
+        if let stopAudio = dependencies?.stopAudio { stopAudio() }
+        else { audio.stop() }
     }
 
     private func processNextCommandIfNeeded() {
@@ -355,6 +375,7 @@ final class DesktopVoiceCoordinator: ObservableObject {
                 var resolvedContext = context
                 var screenRead: DesktopScreenRead?
                 var snapshot: DesktopScreenSnapshot?
+                var requestedFolder: DesktopAccessibilityElement?
                 var decision: DesktopVoiceAssistantDecision
                 if let collection { decision = .collect(collection) }
                 else if resumedRequest != nil && self.preparedText == nil { decision = .beginUIControl }
@@ -380,6 +401,13 @@ final class DesktopVoiceCoordinator: ObservableObject {
                     var offset = 0
                     var needsRead = false
                     var toolResult = "Read the requested UI. Fresh screen context follows."
+                    if requestedFolder != nil {
+                        switch decision {
+                        case .plan, .openURL, .collect, .prepareText, .commitText, .learn:
+                            throw DesktopAXError.invalid("This request selects one folder. I won't substitute another desktop action.")
+                        default: break
+                        }
+                    }
                     switch decision {
                     case .collect(let request):
                         self.status = request.kind == .browserTabs ? "Collecting browser tabs…" : "Collecting unread chats…"
@@ -460,6 +488,25 @@ final class DesktopVoiceCoordinator: ObservableObject {
                         }
                         let element = current.elements[control.elementID]
                         let title = control.description(for: element)
+                        if let folder = requestedFolder,
+                           element.map({ CFEqual($0.reference, folder.reference) }) != true {
+                            rejectedTools += 1
+                            guard rejectedTools <= 3 else { throw DesktopAXError.invalid("I stopped because the requested folder could not be selected safely.") }
+                            toolResult = "No action happened. The user requested only the folder “\(folder.label)”, not a chat or another control. Select that exact folder using its advertised action, or finish blocked."
+                            self.history.trace.record("ui.target_rejected", turnID: taskTurnID,
+                                fields: ["requested_folder": folder.label, "rejected_target": title])
+                            needsRead = true
+                            break
+                        }
+                        if let action = control.action, element?.actions.contains(action) == false {
+                            rejectedTools += 1
+                            guard rejectedTools <= 3 else { throw DesktopAXError.unavailable }
+                            toolResult = "No action happened. \(action) is not advertised for this element. Available actions: \(element?.actions.joined(separator: ", ") ?? "none"). Use an advertised action, or finish blocked; do not switch to an unrelated target."
+                            self.history.trace.record("ui.capability_rejected", turnID: taskTurnID,
+                                fields: ["element_id": control.elementID, "action": action])
+                            needsRead = true
+                            break
+                        }
                         guard progress.willAct(key: DesktopVoiceProgress.controlKey(control, in: current), screen: current.text) else {
                             toolResult = "Blocked repeated operation on an unchanged control: " + title + ". Inspect the newly opened panel/children or the image; do not press it again. Finish blocked if no useful next step exists."
                             self.append(.failure, "Stopped a repeated action", detail: toolResult)
@@ -626,6 +673,9 @@ final class DesktopVoiceCoordinator: ObservableObject {
                             snapshot = try await screenRead!.snapshot()
                         }
                         if let snapshot {
+                            if requestedFolder == nil {
+                                requestedFolder = DesktopTelegramSemantics.requestedFolder(taskRequest, in: snapshot.accessibility)
+                            }
                             self.history.trace.record("ui.snapshot", turnID: taskTurnID, fields: [
                                 "snapshot_id": snapshot.accessibility.snapshotID, "pid": snapshot.accessibility.processIdentifier ?? 0,
                                 "application": snapshot.application, "partial": snapshot.accessibility.truncated,
@@ -971,6 +1021,8 @@ final class DesktopVoiceCoordinator: ObservableObject {
     }
 
     private func fail(_ message: String) {
+        listeningGeneration = UUID()
+        cancellation.cancel()
         recordInterruptedCommands("Voice Control failed: \(message)")
         queuedCommands.removeAll()
         commandIsExecuting = false
@@ -978,9 +1030,10 @@ final class DesktopVoiceCoordinator: ObservableObject {
         autoSubmitTimer = nil
         slowPathTask?.cancel()
         slowPathTask = nil
-        audio.stop()
-        engine?.cancel()
+        let retired = engine
         engine = nil
+        stopAudio()
+        retired?.cancel()
         microphoneMeter.update(0)
         partialTranscript = ""
         phase = .failed

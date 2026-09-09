@@ -38,6 +38,21 @@ does **not** mean zero unread messages. Names alone do not prove a DM. Chat summ
 may include surrounding visible conversation, not just unread messages; unread badge
 counts are not chat counts. Topic categories are textual, not mutations of tab groups.
 
+Telegram Desktop (`com.tdesktop.Telegram`) exposes English chat/folder lists as
+`AXStaticText`, not rows/buttons. The adapter recognizes incoming “N new messages”
+in **Chats**; it excludes **Folders** badges and outgoing “Not seen” receipts.
+Group/channel prefixes classify those chats, while untyped chats remain unknown.
+Localized labels and versions with different AX structures may still be unsupported.
+Where Telegram omits selected-chat evidence, summaries use labeled list previews.
+
+For an explicitly requested Telegram folder lacking `AXPress`, the inventory can
+offer `BtrClick`: one synthetic mouse click at its native AX frame, not model-supplied
+coordinates. Live app/list identity, unchanged geometry, window bounds, and a
+system-wide topmost hit test must all agree. Held modifiers/buttons reject the click.
+Covered or moved controls are not clicked; posted clicks require fresh observation
+before claiming success. A simple “click the Unread folder” request is pinned to that
+folder so a failed attempt cannot turn into an unrelated chat press.
+
 ## Reliability and latency
 
 - Incomplete Responses API output never executes. Token-budget exhaustion retries
@@ -50,6 +65,11 @@ counts are not chat counts. Topic categories are textual, not mutations of tab g
   read-only questions do not gain action permissions from page text.
 - An initially empty lazy AX inventory gets one local read-only retry after 100 ms.
   Populated inventories do not pay this delay.
+- The bounded live conversation uses eager layout and deferred, unanimated scroll
+  updates. Removing gray partial text on Stop must not trigger lazy-stack relayout
+  loops. Retired transcription callbacks cannot alter stopped/restarted sessions.
+- AX batch error/null slots are treated as absent attributes, and native value types
+  are checked before decoding ranges or geometry.
 - No model upgrade or extra speech service is required. There is no sub-second
   guarantee for cloud summaries or multi-page collection: measure the phases below.
 
@@ -77,6 +97,12 @@ extensible `fields`. Start with `conversation.failure`, then follow the turn's
 speech recognition/endpointing time. Model spans isolate network/model latency; AX spans
 isolate desktop latency. A snapshot is bounded raw semantic text, not a full AX dump.
 
+`listening.stop_requested` / `listening.stopped` bracket microphone teardown.
+An independent run-loop watchdog records `ui.unresponsive` after a three-second
+missed heartbeat and `ui.responsive_again` on recovery. It reports once per stall,
+never kills the app, and records neither screen contents nor audio. A hang can
+therefore leave evidence even without a macOS crash report.
+
 The asynchronous diagnostic writer keeps disk work off the interaction thread.
 Files rotate at 8 MB, retaining two previous files. Individual events over 256 KB
 are explicitly clipped. Correlation lasts within retained files; this is not an
@@ -96,6 +122,7 @@ swift build
 .build/debug/BtrVoice --self-test
 .build/debug/BtrVoice --self-test-voice-flow
 .build/debug/BtrVoice --self-test-reading
+.build/debug/BtrVoice --self-test-voice-panel
 # Optional: uses the saved key, synthetic evidence only; incurs a small API charge.
 .build/debug/BtrVoice --self-test-reading-model
 # Signed bundle: disposable cross-process native fixture, never personal apps.
@@ -106,3 +133,6 @@ Tests cover incomplete/malformed calls, stale recovery, strict collection argume
 DM evidence, source-selection races, preview-only reads, focus loss, bounded retry,
 credential/media redaction, retention, and one-batch/one-summary orchestration.
 Fixtures are not a compatibility certification for Telegram, Slack, or every browser.
+The panel replay opens only a synthetic non-activating overlay, exercises long
+Markdown/partial/Stop/resize transitions, and has an independent timeout. Native
+fixtures also verify a static-text click without AXPress and reject moved geometry.

@@ -18,6 +18,11 @@ enum DesktopCollectionReader {
         let ordered = context.elements.values.sorted { number($0.id) < number($1.id) }
         var result: [Candidate] = []
         for element in ordered {
+            if kind == .unreadMessages, element.enabled != false,
+               let item = DesktopTelegramSemantics.unreadItem(element, in: context) {
+                result.append(Candidate(element: element, item: item))
+                continue
+            }
             guard ["AXTab", "AXRadioButton", "AXRow", "AXCell", "AXButton"].contains(element.role),
                   element.enabled != false else { continue }
             let parents = ancestors(of: element, in: context)

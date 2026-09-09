@@ -49,6 +49,8 @@ enum DesktopVoiceFlowSelfTest {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("btrvoice-flow-\(UUID().uuidString)")
         var text = "[e1] AXButton: Courses | available actions: AXPress\n[e2] AXTextField: Search"
         var presses = 0
+        var controlledIDs: [String] = []
+        var snapshotOverride: (() -> DesktopScreenSnapshot)?
         var plans = 0
         var addresses: [URL] = []
         var insertions: [(String, Bool)] = []
@@ -57,10 +59,14 @@ enum DesktopVoiceFlowSelfTest {
         var afterPress: String?
         var lastContext: DesktopVoiceAssistant.Context?
         var collect: ((DesktopCollectionRequest) async throws -> DesktopReadingCollection)?
+        var makeTranscriber: (() -> TranscriptionEngine)?
+        var startAudio: (() throws -> Void)?
+        var stopAudio: (() -> Void)?
         var resolveApplication: (String) -> DesktopVoiceApplicationTarget? = { _ in nil }
         var respond: ((String, DesktopVoiceAssistant.Context, DesktopScreenSnapshot?, String?) async throws -> DesktopVoiceAssistantDecision)!
 
         func snapshot() -> DesktopScreenSnapshot {
+            if let snapshotOverride { return snapshotOverride() }
             let ref = AXUIElementCreateApplication(42)
             var ax = DesktopAccessibilityContext(text: text, elementCount: 2, truncated: false)
             ax.processIdentifier = 42
@@ -75,10 +81,11 @@ enum DesktopVoiceFlowSelfTest {
                     lastContext = context
                     return try await respond(command, context, screen, result)
                 }, read: { [self] _, _, _, _ in snapshot() },
-                control: { [self] _, _ in
+                control: { [self] command, _ in
                     if staleControls > 0 { staleControls -= 1; throw DesktopAXError.stale }
                     if slowControl { try await Task.sleep(nanoseconds: 1_000_000_000) }
                     presses += 1
+                    controlledIDs.append(command.elementID)
                     if let afterPress { text = afterPress }
                     return "The app accepted the press; outcome not verified."
                 }, plan: { [self] _, token in if !token.isCancelled { plans += 1 } },
@@ -86,7 +93,7 @@ enum DesktopVoiceFlowSelfTest {
                 insertText: { [self] text, send, token in
                     guard !token.isCancelled else { throw CancellationError() }
                     insertions.append((text, send)); self.text += "\nInserted: " + text
-                }, collect: collect)
+                }, collect: collect, makeTranscriber: makeTranscriber, startAudio: startAudio, stopAudio: stopAudio)
             return DesktopVoiceCoordinator(history: DesktopVoiceHistoryStore(directory: directory), dependencies: dependencies)
         }
 
@@ -106,6 +113,38 @@ enum DesktopVoiceFlowSelfTest {
             check("conversation finishes within the replay deadline", !coordinator.isCommandRunning)
         }
         pure(check: check)
+
+        do {
+            let fixture = Fixture(); defer { fixture.clean() }
+            let initial = fixture.snapshot()
+            fixture.snapshotOverride = {
+                var context = initial.accessibility
+                context.bundleIdentifier = "com.tdesktop.Telegram"
+                context.elements["e3"] = .init(id: "e3", reference: AXUIElementCreateApplication(43), parentID: "e4",
+                    role: "AXStaticText", label: "Unread (12 unread chats)", actions: [DesktopAccessibilityClick.action], writable: [:], enabled: true)
+                context.elements["e4"] = .init(id: "e4", reference: AXUIElementCreateApplication(44), parentID: nil,
+                    role: "AXList", label: "Folders", actions: [], writable: [:], enabled: true)
+                return DesktopScreenSnapshot(jpeg: nil, width: 0, height: 0, displayID: 0, application: "Fixture", capturedAt: Date(), accessibility: context)
+            }
+            var calls = 0
+            fixture.respond = { _, _, screen, result in
+                calls += 1
+                guard let screen else { return .beginUIControl }
+                if calls == 2 { return .controlUI(.init(snapshotID: screen.accessibility.snapshotID, elementID: "e3", action: "AXPress")) }
+                if calls == 3 {
+                    check("unsupported press gives actionable advertised-capability feedback", result?.contains("BtrClick") == true)
+                    return .controlUI(.init(snapshotID: screen.accessibility.snapshotID, elementID: "e1", action: "AXPress"))
+                }
+                if calls == 4 {
+                    check("folder request refuses a drift to another control", result?.contains("not a chat") == true)
+                    return .controlUI(.init(snapshotID: screen.accessibility.snapshotID, elementID: "e3", action: DesktopAccessibilityClick.action))
+                }
+                return try finish(false, "The exact folder was clicked; selection remains unverified.")
+            }
+            let coordinator = fixture.coordinator(); coordinator.submit("Yeah, can you click the unread one?")
+            await wait(coordinator)
+            check("only the requested folder reaches desktop execution", fixture.controlledIDs == ["e3"])
+        }
 
         do {
             let fixture = Fixture(); defer { fixture.clean() }
